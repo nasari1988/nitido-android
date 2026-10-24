@@ -1,0 +1,53 @@
+name: Compilar APK
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Descomprimir proyecto
+        run: |
+          set -e
+          test -f project.zip
+          unzip -o project.zip -d .
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: "8.7"
+
+      - name: Descargar modelo Real-ESRGAN
+        run: |
+          set -e
+          URL="https://qaihub-public-assets.s3.us-west-2.amazonaws.com/qai-hub-models/models/real_esrgan_general_x4v3/releases/v0.46.0/real_esrgan_general_x4v3-tflite-float.zip"
+          curl -fL --retry 3 -o model.zip "$URL"
+          unzip -o model.zip -d model
+          f=$(find model -name '*.tflite' | head -1)
+          test -n "$f"
+          mkdir -p app/src/main/assets
+          cp "$f" app/src/main/assets/realesrgan_x4.tflite
+
+      - name: Compilar
+        run: gradle assembleRelease --no-daemon --stacktrace
+
+      - name: Publicar APK
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          cp app/build/outputs/apk/release/app-release.apk Nitido.apk
+          gh release create "v0.1.${{ github.run_number }}" Nitido.apk \
+            --title "Nítido 0.1.${{ github.run_number }}" \
+            --notes "Toca Nitido.apk para instalarla."
