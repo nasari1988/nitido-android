@@ -4,9 +4,17 @@ on:
   workflow_dispatch:
     inputs:
       modelo:
-        description: Modelo a convertir
+        description: Modelo a convertir (o "personalizado" para usar un enlace)
         type: choice
-        options: [dreamshaper8, realistic, anime, pix2pix]
+        options: [personalizado, dreamshaper8, realistic, anime, pix2pix]
+      enlace:
+        description: "Solo personalizado: enlace de Hugging Face (página del modelo o archivo .safetensors)"
+        type: string
+        required: false
+      nombre:
+        description: "Solo personalizado: nombre corto para la app (letras, números y guiones; ej. mi-modelo)"
+        type: string
+        required: false
 
 permissions:
   contents: write
@@ -14,12 +22,33 @@ permissions:
 jobs:
   convert:
     runs-on: ubuntu-latest
-    timeout-minutes: 150
+    timeout-minutes: 300
     steps:
       - uses: actions/checkout@v4
 
       - name: Descomprimir proyecto
         run: unzip -o -q project.zip -d .
+
+      - name: Revisar datos
+        id: datos
+        env:
+          MODELO: ${{ inputs.modelo }}
+          ENLACE: ${{ inputs.enlace }}
+          NOMBRE: ${{ inputs.nombre }}
+        run: |
+          if [ "$MODELO" = "personalizado" ]; then
+            ID=$(echo "$NOMBRE" | tr 'A-Z' 'a-z' | tr -c 'a-z0-9-\n' '-' | sed 's/^-*//;s/-*$//')
+            if [ -z "$ENLACE" ] || [ -z "$ID" ]; then
+              echo "::error::Para 'personalizado' escribe el enlace y el nombre."
+              exit 1
+            fi
+          else
+            ID="$MODELO"
+            ENLACE=""
+          fi
+          echo "Nombre en la app: $ID"
+          echo "id=$ID" >> "$GITHUB_OUTPUT"
+          echo "enlace=$ENLACE" >> "$GITHUB_OUTPUT"
 
       - name: Liberar espacio
         run: |
@@ -27,12 +56,12 @@ jobs:
           df -h /
 
       - name: Convertir
-        run: bash ci/convert_model.sh "${{ inputs.modelo }}"
+        run: bash ci/convert_model.sh "${{ steps.datos.outputs.id }}" "${{ steps.datos.outputs.enlace }}"
 
       - name: Publicar modelo
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          TAG="modelo-${{ inputs.modelo }}"
-          gh release view "$TAG" >/dev/null 2>&1 || gh release create "$TAG" --title "Modelo ${{ inputs.modelo }}" --notes "Archivos del modelo para la app." --latest=false
+          TAG="modelo-${{ steps.datos.outputs.id }}"
+          gh release view "$TAG" >/dev/null 2>&1 || gh release create "$TAG" --title "Modelo ${{ steps.datos.outputs.id }}" --notes "Archivos del modelo para la app. En la app: Agregar modelo → ${{ steps.datos.outputs.id }}" --latest=false
           gh release upload "$TAG" out/* --clobber
