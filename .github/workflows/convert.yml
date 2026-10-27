@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
     inputs:
       modelo:
-        description: Modelo a convertir (o "personalizado" para usar un enlace)
+        description: Modelo a convertir (o "personalizado" para usar un enlace; SD 1.5 o SDXL)
         type: choice
         options: [personalizado, dreamshaper8, realistic, anime, pix2pix]
       enlace:
@@ -15,6 +15,19 @@ on:
         description: "Solo personalizado: nombre corto para la app (letras, números y guiones; ej. mi-modelo)"
         type: string
         required: false
+      precision:
+        description: "Precisión: 8 bits (más ligero) o 16 bits (más fiel). SDXL siempre usa 8 bits"
+        type: choice
+        options: ["16", "8"]
+      lora:
+        description: "Opcional: enlace de una LoRA para mezclarla en el modelo (Hugging Face o descarga directa)"
+        type: string
+        required: false
+      lora_peso:
+        description: "Opcional: fuerza de la LoRA (0.1 a 1.5; normal 0.7–0.9)"
+        type: string
+        required: false
+        default: "0.8"
 
 permissions:
   contents: write
@@ -22,7 +35,7 @@ permissions:
 jobs:
   convert:
     runs-on: ubuntu-latest
-    timeout-minutes: 300
+    timeout-minutes: 360
     steps:
       - uses: actions/checkout@v4
 
@@ -33,6 +46,7 @@ jobs:
         id: datos
         env:
           MODELO: ${{ inputs.modelo }}
+          PRECISION: ${{ inputs.precision }}
           ENLACE: ${{ inputs.enlace }}
           NOMBRE: ${{ inputs.nombre }}
         run: |
@@ -45,6 +59,7 @@ jobs:
           else
             ID="$MODELO"
             ENLACE=""
+            if [ "$PRECISION" = "16" ]; then ID="$MODELO-16"; fi
           fi
           echo "Nombre en la app: $ID"
           echo "id=$ID" >> "$GITHUB_OUTPUT"
@@ -56,7 +71,10 @@ jobs:
           df -h /
 
       - name: Convertir
-        run: bash ci/convert_model.sh "${{ steps.datos.outputs.id }}" "${{ steps.datos.outputs.enlace }}"
+        env:
+          LORA: ${{ inputs.lora }}
+          LORA_PESO: ${{ inputs.lora_peso }}
+        run: bash ci/convert_model.sh "${{ steps.datos.outputs.id }}" "${{ steps.datos.outputs.enlace }}" "${{ inputs.precision }}" "$LORA" "$LORA_PESO"
 
       - name: Publicar modelo
         env:
