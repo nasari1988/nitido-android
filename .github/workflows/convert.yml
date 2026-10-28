@@ -8,7 +8,7 @@ on:
         type: choice
         options: [personalizado, dreamshaper8, realistic, anime, pix2pix]
       enlace:
-        description: "Solo personalizado: enlace de Hugging Face (página del modelo o archivo .safetensors)"
+        description: "Solo personalizado: enlace de Hugging Face o Civitai (página del modelo o archivo .safetensors)"
         type: string
         required: false
       nombre:
@@ -20,7 +20,7 @@ on:
         type: choice
         options: ["16", "8"]
       lora:
-        description: "Opcional: enlace de una LoRA para mezclarla en el modelo (Hugging Face o descarga directa)"
+        description: "Opcional: enlace de una LoRA para mezclarla en el modelo (Hugging Face, Civitai o descarga directa)"
         type: string
         required: false
       lora_peso:
@@ -72,6 +72,7 @@ jobs:
 
       - name: Convertir
         env:
+          CIVITAI_TOKEN: ${{ secrets.CIVITAI_TOKEN }}
           LORA: ${{ inputs.lora }}
           LORA_PESO: ${{ inputs.lora_peso }}
         run: bash ci/convert_model.sh "${{ steps.datos.outputs.id }}" "${{ steps.datos.outputs.enlace }}" "${{ inputs.precision }}" "$LORA" "$LORA_PESO"
