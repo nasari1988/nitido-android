@@ -16,9 +16,9 @@ on:
         type: string
         required: false
       precision:
-        description: "Precisión: 8 bits (más ligero) o 16 bits (más fiel). SDXL usa 8 bits salvo que elijas 16-sdxl (prueba: ~7 GB)"
+        description: "Precisión: 8 bits (más ligero) o 16 bits (más fiel). SDXL siempre usa 8 bits"
         type: choice
-        options: ["16", "8", "16-sdxl"]
+        options: ["16", "8"]
       lora:
         description: "Opcional: enlace de una LoRA para mezclarla en el modelo (Hugging Face, Civitai o descarga directa)"
         type: string
