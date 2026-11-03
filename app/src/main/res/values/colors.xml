@@ -1,9 +1,0 @@
-<?xml version="1.0" encoding="utf-8"?>
-<resources>
-    <color name="bg">#EEF0EC</color>
-    <color name="stage">#E1E5DF</color>
-    <color name="fg">#18201D</color>
-    <color name="muted">#5B6660</color>
-    <color name="accent">#0F6E6A</color>
-    <color name="after">#D08A1E</color>
-</resources>
