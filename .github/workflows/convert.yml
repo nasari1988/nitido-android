@@ -16,9 +16,9 @@ on:
         type: string
         required: false
       precision:
-        description: "Precisión: 8 bits (más ligero) o 16 bits (más fiel). SDXL siempre usa 8 bits"
+        description: "Precisión: 8 bits (más ligero), 16 bits (más fiel) o npu (UNet para la NPU de Qualcomm; nombre terminado en -npu)"
         type: choice
-        options: ["16", "8"]
+        options: ["16", "8", "npu"]
       lora:
         description: "Opcional: enlace de una LoRA para mezclarla en el modelo (Hugging Face, Civitai o descarga directa)"
         type: string
@@ -59,7 +59,7 @@ jobs:
           else
             ID="$MODELO"
             ENLACE=""
-            if [ "$PRECISION" != "8" ]; then ID="$MODELO-16"; fi
+            if [ "$PRECISION" = "16" ]; then ID="$MODELO-16"; elif [ "$PRECISION" = "npu" ]; then ID="$MODELO-npu"; fi
           fi
           echo "Nombre en la app: $ID"
           echo "id=$ID" >> "$GITHUB_OUTPUT"
