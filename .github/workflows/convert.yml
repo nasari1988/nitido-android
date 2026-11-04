@@ -84,3 +84,12 @@ jobs:
           TAG="modelo-${{ steps.datos.outputs.id }}"
           gh release view "$TAG" >/dev/null 2>&1 || gh release create "$TAG" --title "Modelo ${{ steps.datos.outputs.id }}" --notes "Archivos del modelo para la app. En la app: Agregar modelo → ${{ steps.datos.outputs.id }}" --latest=false
           gh release upload "$TAG" out/* --clobber
+
+      - name: Publicar bibliotecas de la NPU
+        if: hashFiles('qnn_runtime/libQnnHtp.so') != ''
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          TAG="qnn-runtime-2.51"
+          gh release view "$TAG" >/dev/null 2>&1 || gh release create "$TAG" --title "Bibliotecas QNN 2.51 (NPU)" --notes "Las usa la compilación de la app; no se instalan a mano." --latest=false
+          gh release upload "$TAG" qnn_runtime/* --clobber
