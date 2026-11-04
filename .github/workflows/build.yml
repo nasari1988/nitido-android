@@ -33,6 +33,8 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh release create "v0.2.${{ github.run_number }}" Nitido.apk \
+          EXTRA=""
+          if [ -f symbols/libsdjni.so ]; then gzip -c symbols/libsdjni.so > libsdjni-simbolos.so.gz; EXTRA="libsdjni-simbolos.so.gz"; fi
+          gh release create "v0.2.${{ github.run_number }}" Nitido.apk $EXTRA \
             --title "Nítido 0.2.${{ github.run_number }}" \
             --notes "Toca Nitido.apk para instalarla."
