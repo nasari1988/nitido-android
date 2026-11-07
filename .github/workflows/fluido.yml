@@ -1,0 +1,44 @@
+name: Convertir Más fluido (RIFE)
+
+on:
+  workflow_dispatch:
+
+jobs:
+  # no secrets and read-only: only the checked weights in the repo are used
+  convert:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - name: Descomprimir proyecto
+        run: unzip -o -q project.zip -d .
+      - name: Convertir
+        run: bash ci/rife_build.sh
+      - uses: actions/upload-artifact@v4
+        with:
+          name: modelo-fluido
+          path: out/
+          retention-days: 3
+
+  # publishes the files; runs nothing from the model
+  publish:
+    needs: convert
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: modelo-fluido
+          path: out
+      - name: Publicar
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          ls -la out
+          TAG="modelo-fluido"
+          gh release view "$TAG" >/dev/null 2>&1 || gh release create "$TAG" --title "Más fluido (RIFE 4.25)" --notes "Cuadros intermedios para Video → Más fluido. La app lo descarga sola." --latest=false
+          gh release upload "$TAG" out/* --clobber
