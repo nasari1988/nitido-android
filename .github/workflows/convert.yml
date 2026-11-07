@@ -28,6 +28,11 @@ on:
         type: string
         required: false
         default: "0.8"
+      npu_partes:
+        description: "Solo SDXL con npu (experimental): qué partes de la UNet compilar, ej. 1,2 (vacío = todas)"
+        type: string
+        required: false
+        default: ""
 
 permissions:
   contents: write
@@ -75,6 +80,7 @@ jobs:
           CIVITAI_TOKEN: ${{ secrets.CIVITAI_TOKEN }}
           LORA: ${{ inputs.lora }}
           LORA_PESO: ${{ inputs.lora_peso }}
+          NPU_PARTS: ${{ inputs.npu_partes }}
         run: bash ci/convert_model.sh "${{ steps.datos.outputs.id }}" "${{ steps.datos.outputs.enlace }}" "${{ inputs.precision }}" "$LORA" "$LORA_PESO"
 
       - name: Publicar modelo
