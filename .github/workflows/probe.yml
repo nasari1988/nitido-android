@@ -1,0 +1,21 @@
+name: Revisar modelos NPU
+on: workflow_dispatch
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Revisar
+        run: |
+          B=https://qaihub-public-assets.s3.us-west-2.amazonaws.com/qai-hub-models/models
+          for m in rife rife_v4 rife46 film film_net ifrnet frame_interpolation stable_diffusion_xl stable_diffusion_xl_base sdxl sdxl_turbo stable_diffusion_xl_turbo stable_diffusion_v1_5 stable_diffusion_v2_1 controlnet_canny; do
+            for v in v0.65.0 v0.60.0 v0.50.1 v0.45.0; do
+              for p in w8a16 w8a8 float; do
+                for kind in onnx qnn_context_binary precompiled_qnn_onnx; do
+                  z=$m-$kind-$p.zip
+                  c=$(curl -s -o /dev/null -w "%{http_code}" -I "$B/$m/releases/$v/$z")
+                  [ "$c" = "200" ] && echo "HAY $m $v $kind $p"
+                done
+              done
+            done
+          done
+          echo fin
