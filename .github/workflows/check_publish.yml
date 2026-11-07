@@ -1,0 +1,30 @@
+name: Publicar imágenes de prueba
+
+on:
+  workflow_dispatch:
+    inputs:
+      run_id:
+        description: Corrida de la prueba de precisión
+        required: true
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      actions: read
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: prueba-sdxl
+          path: check
+          run-id: ${{ inputs.run_id }}
+          github-token: ${{ github.token }}
+      - name: Publicar
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          ls -la check
+          gh release view prueba-sdxl >/dev/null 2>&1 || gh release create prueba-sdxl --title "Prueba de precisión SDXL" --notes "Imágenes de la prueba (no es para la app)." --prerelease --latest=false
+          gh release upload prueba-sdxl check/* --clobber
