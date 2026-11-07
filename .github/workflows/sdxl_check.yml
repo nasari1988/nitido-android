@@ -1,0 +1,38 @@
+name: Prueba de precisión SDXL NPU
+
+on:
+  workflow_dispatch:
+    inputs:
+      enlace:
+        description: Enlace del modelo SDXL
+        default: https://huggingface.co/SG161222/RealVisXL_V5.0_Lightning
+
+jobs:
+  # makes the same picture with the original UNet and with the NPU's precision (on the computer); read-only
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 300
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - name: Descomprimir proyecto
+        run: unzip -o -q project.zip -d .
+      - name: Memoria extra (swap)
+        run: |
+          SWAPDIR=/mnt; [ -w /mnt ] || SWAPDIR=/
+          sudo fallocate -l 30G "$SWAPDIR/swapfile" && sudo chmod 600 "$SWAPDIR/swapfile" && sudo mkswap "$SWAPDIR/swapfile" && sudo swapon "$SWAPDIR/swapfile" || true
+          free -h
+      - name: Python
+        run: |
+          source ci/venv.sh
+          .venv/bin/pip install --quiet "torch==2.4.1" --index-url https://download.pytorch.org/whl/cpu
+          .venv/bin/pip install --quiet "diffusers==0.30.3" "transformers==4.44.2" "huggingface_hub==0.25.2" \
+            "onnx==1.16.2" "safetensors==0.4.5" "accelerate==0.34.2" "peft==0.12.0" "omegaconf" "numpy<2" "onnxruntime==1.19.2"
+      - name: Prueba
+        run: NPU=1 NPU_SDXL_CHECK=1 .venv/bin/python ci/export_model.py realvisxl-check onnx "${{ inputs.enlace }}" "" "0.8"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: prueba-sdxl
+          path: onnx/check/
+          retention-days: 3
