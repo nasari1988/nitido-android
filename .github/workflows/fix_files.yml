@@ -1,0 +1,25 @@
+name: Rehacer lista de archivos
+
+on:
+  workflow_dispatch:
+    inputs:
+      etiqueta:
+        description: Publicación (ej. modelo-sdxl-lora-v2-npu)
+        required: true
+
+jobs:
+  # files.txt from the release's real assets (runs in parallel can overwrite each other's list)
+  fix:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Rehacer
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          T="${{ inputs.etiqueta }}"
+          gh api "repos/$GH_REPO/releases/tags/$T" --jq '.assets[] | select(.name != "files.txt") | "\(.name) \(.size)"' > files.txt
+          cat files.txt
+          gh release upload "$T" files.txt --clobber
