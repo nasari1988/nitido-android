@@ -2,23 +2,30 @@ name: Convertir Más fluido (RIFE)
 
 on:
   workflow_dispatch:
+    inputs:
+      que:
+        description: "Qué convertir: fluido (RIFE) o realismo (PiSA-SR)"
+        default: fluido
 
 jobs:
-  # no secrets and read-only: only the checked weights in the repo are used
+  # no secrets and read-only: only checked weights in the repo (and SD 2.1-base from Hugging Face for realismo)
   convert:
     runs-on: ubuntu-latest
-    timeout-minutes: 120
+    timeout-minutes: 300
     permissions:
       contents: read
     steps:
       - uses: actions/checkout@v4
       - name: Descomprimir proyecto
         run: unzip -o -q project.zip -d .
+      - name: Liberar espacio
+        run: sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL /usr/local/share/boost
       - name: Convertir
-        run: bash ci/rife_build.sh
+        run: |
+          if [ "${{ inputs.que }}" = "realismo" ]; then bash ci/pisa_build.sh; else bash ci/rife_build.sh; fi
       - uses: actions/upload-artifact@v4
         with:
-          name: modelo-fluido
+          name: modelo-${{ inputs.que }}
           path: out/
           retention-days: 3
 
@@ -31,7 +38,7 @@ jobs:
     steps:
       - uses: actions/download-artifact@v4
         with:
-          name: modelo-fluido
+          name: modelo-${{ inputs.que }}
           path: out
       - name: Publicar
         env:
@@ -39,6 +46,6 @@ jobs:
           GH_REPO: ${{ github.repository }}
         run: |
           ls -la out
-          TAG="modelo-fluido"
-          gh release view "$TAG" >/dev/null 2>&1 || gh release create "$TAG" --title "Más fluido (RIFE 4.25)" --notes "Cuadros intermedios para Video → Más fluido. La app lo descarga sola." --latest=false
+          TAG="modelo-${{ inputs.que }}"
+          gh release view "$TAG" >/dev/null 2>&1 || gh release create "$TAG" --title "$TAG" --notes "La app lo descarga sola." --latest=false
           gh release upload "$TAG" out/* --clobber
