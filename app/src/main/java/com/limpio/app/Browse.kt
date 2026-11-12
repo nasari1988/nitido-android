@@ -476,7 +476,7 @@ class BrowseViewModel(app: Application) : AndroidViewModel(app) {
                 src.renameTo(dest).also { if (it) FileOps.rescan(ctx, listOf(path, dest.absolutePath)) }
             }
             if (ok && path in favorites) {
-                setFavorites(favorites - path + dest.absolutePath)
+                saveFavorites(favorites - path + dest.absolutePath)
             }
             afterChange(if (ok) "Renombrado" else "No se pudo renombrar")
         }
@@ -491,7 +491,7 @@ class BrowseViewModel(app: Application) : AndroidViewModel(app) {
         afterChange(if (f.mkdirs()) "Carpeta creada" else "No se pudo crear la carpeta")
     }
 
-    private fun setFavorites(f: Set<String>) {
+    private fun saveFavorites(f: Set<String>) {
         favorites = f
         prefs.edit().putStringSet("favs", f).apply()
     }
