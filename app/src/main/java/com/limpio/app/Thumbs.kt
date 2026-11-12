@@ -59,11 +59,10 @@ fun kindIcon(kind: FileKind?): ImageVector = when (kind) {
 
 /** Miniatura real del archivo: foto, fotograma de video, carátula de canción o ícono de APK. */
 @Composable
-fun FileThumb(path: String, isDir: Boolean, size: Dp = 52.dp) {
+fun FileThumb(path: String, isDir: Boolean, size: Dp = 52.dp, modifier: Modifier = Modifier.size(size)) {
     val kind = if (isDir) null else FileTypes.kindOf(path)
     Box(
-        Modifier
-            .size(size)
+        modifier
             .clip(RoundedCornerShape(10.dp))
             .background(MaterialTheme.colorScheme.surfaceVariant),
         contentAlignment = Alignment.Center

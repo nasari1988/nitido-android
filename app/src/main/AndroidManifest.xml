@@ -13,6 +13,8 @@
     <uses-permission
         android:name="android.permission.WRITE_EXTERNAL_STORAGE"
         android:maxSdkVersion="29" />
+    <!-- Para instalar APKs desde el explorador -->
+    <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
     <!-- Para detectar restos de apps desinstaladas e instaladores ya instalados -->
     <uses-permission
         android:name="android.permission.QUERY_ALL_PACKAGES"

@@ -63,7 +63,7 @@ class MainActivity : ComponentActivity() {
 
     private val cleaner: MainViewModel by viewModels()
     private val organizer: OrganizerViewModel by viewModels()
-    private val explorer: ExplorerViewModel by viewModels()
+    private val browse: BrowseViewModel by viewModels()
     private val dups: DupViewModel by viewModels()
     private var hasPermission by mutableStateOf(false)
 
@@ -78,7 +78,7 @@ class MainActivity : ComponentActivity() {
                     .build()
             }
             LimpioTheme {
-                if (hasPermission) LimpioApp(cleaner, dups, organizer, explorer)
+                if (hasPermission) LimpioApp(browse, cleaner, dups, organizer)
                 else PermissionScreen()
             }
         }
@@ -94,7 +94,7 @@ class MainActivity : ComponentActivity() {
             System.currentTimeMillis() - cleaner.scannedAt > 20_000
         ) cleaner.scan()
         if (organizer.groups != null && organizer.open == null) organizer.scan()
-        explorer.load()
+        if (browse.viewer == null) browse.load()
         dups.pruneMissing()
     }
 
@@ -172,46 +172,51 @@ fun LimpioTheme(content: @Composable () -> Unit) {
 
 @Composable
 fun LimpioApp(
+    browse: BrowseViewModel,
     cleaner: MainViewModel,
     dups: DupViewModel,
     organizer: OrganizerViewModel,
-    explorer: ExplorerViewModel,
 ) {
     var tab by rememberSaveable { mutableIntStateOf(0) }
-    Scaffold(
-        contentWindowInsets = WindowInsets(0, 0, 0, 0),
-        bottomBar = {
-            NavigationBar {
-                NavigationBarItem(
-                    selected = tab == 0, onClick = { tab = 0 },
-                    icon = { Icon(Icons.Filled.CleaningServices, null) },
-                    label = { Text("Limpiar") }
-                )
-                NavigationBarItem(
-                    selected = tab == 1, onClick = { tab = 1 },
-                    icon = { Icon(Icons.Filled.ContentCopy, null) },
-                    label = { Text("Duplicados") }
-                )
-                NavigationBarItem(
-                    selected = tab == 2, onClick = { tab = 2 },
-                    icon = { Icon(Icons.Filled.AutoAwesome, null) },
-                    label = { Text("Organizar") }
-                )
-                NavigationBarItem(
-                    selected = tab == 3, onClick = { tab = 3 },
-                    icon = { Icon(Icons.Filled.Folder, null) },
-                    label = { Text("Archivos") }
-                )
+    Box(Modifier.fillMaxSize()) {
+        Scaffold(
+            contentWindowInsets = WindowInsets(0, 0, 0, 0),
+            bottomBar = {
+                NavigationBar {
+                    NavigationBarItem(
+                        selected = tab == 0, onClick = { if (tab == 0) browse.goHome() else tab = 0 },
+                        icon = { Icon(Icons.Filled.Folder, null) },
+                        label = { Text("Inicio") }
+                    )
+                    NavigationBarItem(
+                        selected = tab == 1, onClick = { tab = 1 },
+                        icon = { Icon(Icons.Filled.CleaningServices, null) },
+                        label = { Text("Limpiar") }
+                    )
+                    NavigationBarItem(
+                        selected = tab == 2, onClick = { tab = 2 },
+                        icon = { Icon(Icons.Filled.ContentCopy, null) },
+                        label = { Text("Duplicados") }
+                    )
+                    NavigationBarItem(
+                        selected = tab == 3, onClick = { tab = 3 },
+                        icon = { Icon(Icons.Filled.AutoAwesome, null) },
+                        label = { Text("Organizar") }
+                    )
+                }
+            }
+        ) { pad ->
+            Box(Modifier.fillMaxSize().padding(bottom = pad.calculateBottomPadding())) {
+                when (tab) {
+                    0 -> BrowseTab(browse, onClean = { tab = 1 })
+                    1 -> CleanerTab(cleaner)
+                    2 -> DupTab(dups)
+                    else -> OrganizerTab(organizer)
+                }
             }
         }
-    ) { pad ->
-        Box(Modifier.fillMaxSize().padding(bottom = pad.calculateBottomPadding())) {
-            when (tab) {
-                0 -> CleanerTab(cleaner)
-                1 -> DupTab(dups)
-                2 -> OrganizerTab(organizer)
-                else -> ExplorerTab(explorer)
-            }
-        }
+        // Visor a pantalla completa (encima de todo, incluida la barra inferior).
+        if (browse.viewer != null) MediaViewer(browse)
+        DetailsDialog(browse)
     }
 }
