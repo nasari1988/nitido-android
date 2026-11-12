@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
     inputs:
       que:
-        description: "Qué convertir: fluido (RIFE) o realismo (PiSA-SR)"
+        description: "Qué convertir: fluido (RIFE), realismo (PiSA-SR) o limpiar (RealBasicVSR, prueba)"
         default: fluido
 
 jobs:
@@ -30,7 +30,11 @@ jobs:
         env:
           PY310: ${{ steps.py310.outputs.python-path }}
         run: |
-          if [ "${{ inputs.que }}" = "realismo" ]; then bash ci/pisa_build.sh; else bash ci/rife_build.sh; fi
+          case "${{ inputs.que }}" in
+            realismo) bash ci/pisa_build.sh ;;
+            limpiar) bash ci/rbvsr_build.sh ;;
+            *) bash ci/rife_build.sh ;;
+          esac
       - uses: actions/upload-artifact@v4
         with:
           name: modelo-${{ inputs.que }}
