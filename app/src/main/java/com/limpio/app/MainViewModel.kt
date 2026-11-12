@@ -1,7 +1,6 @@
 package com.limpio.app
 
 import android.app.Application
-import android.media.MediaScannerConnection
 import android.os.Environment
 import android.os.StatFs
 import androidx.compose.runtime.getValue
@@ -32,6 +31,9 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     var selection by mutableStateOf<Map<Category, Set<String>>>(emptyMap())
         private set
     var openCategory by mutableStateOf<Category?>(null)
+    var showQuick by mutableStateOf(false)
+    var quickSelection by mutableStateOf<Set<String>>(emptySet())
+        private set
     var message by mutableStateOf<String?>(null)
     var storageTotal by mutableStateOf(0L)
         private set
@@ -75,9 +77,18 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
             selection = r.items.mapValues { (_, list) ->
                 list.filter { it.preselected }.map { it.path }.toSet()
             }
+            quickSelection = quickCleanItems().map { it.path }.toSet()
             phase = Phase.Ready
             refreshStorage()
         }
+    }
+
+    fun toggleQuick(path: String) {
+        quickSelection = if (path in quickSelection) quickSelection - path else quickSelection + path
+    }
+
+    fun setAllQuick(on: Boolean) {
+        quickSelection = if (on) quickCleanItems().map { it.path }.toSet() else emptySet()
     }
 
     // ---------- Selección ----------
@@ -111,7 +122,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
 
     // ---------- Borrado ----------
 
-    fun quickClean() = delete(quickCleanItems())
+    fun quickClean() = delete(quickCleanItems().filter { it.path in quickSelection })
 
     fun deleteSelected(cat: Category) = delete(selectedItems(cat))
 
@@ -124,8 +135,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
             val deleted = HashSet<String>()
             withContext(Dispatchers.IO) {
                 items.forEachIndexed { i, item ->
-                    val f = File(item.path)
-                    val ok = if (item.isDir) f.deleteRecursively() else (f.delete() || !f.exists())
+                    val ok = FileOps.deletePermanently(File(item.path))
                     if (ok) {
                         freed += item.size
                         deleted += item.path
@@ -133,16 +143,13 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                     if (i % 20 == 0) phase = Phase.Cleaning(i, items.size)
                 }
                 // Avisar a la galería para que no muestre archivos fantasma.
-                val paths = deleted.toTypedArray()
-                if (paths.isNotEmpty()) {
-                    MediaScannerConnection.scanFile(getApplication(), paths, null, null)
-                }
+                FileOps.rescan(getApplication(), deleted)
             }
             removeFromResult(deleted)
             phase = Phase.Ready
             refreshStorage()
             message = buildString {
-                append("Liberaste ${formatSize(getApplication(), freed)}")
+                append("Eliminaste permanentemente ${formatSize(getApplication(), freed)}")
                 if (failed > 0) append(" · $failed elementos no se pudieron borrar")
             }
         }
@@ -166,5 +173,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
             val valid = newItems[cat].orEmpty().map { it.path }.toSet()
             sel.filter { it in valid }.toSet()
         }
+        val quickValid = quickCleanItems().map { it.path }.toSet()
+        quickSelection = quickSelection.filter { it in quickValid }.toSet()
     }
 }

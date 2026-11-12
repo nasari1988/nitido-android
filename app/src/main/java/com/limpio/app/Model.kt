@@ -66,3 +66,71 @@ data class ScanResult(
     val filesScanned: Int,
     val durationMs: Long,
 )
+
+enum class FileKind { IMAGE, VIDEO, AUDIO, DOCUMENT, ARCHIVE, APK, OTHER }
+
+object FileTypes {
+    private val map: Map<String, FileKind> = buildMap {
+        listOf("jpg", "jpeg", "png", "webp", "gif", "heic", "heif", "bmp", "dng")
+            .forEach { put(it, FileKind.IMAGE) }
+        listOf("mp4", "mkv", "avi", "mov", "webm", "3gp", "m4v", "ts", "wmv", "flv")
+            .forEach { put(it, FileKind.VIDEO) }
+        listOf("mp3", "m4a", "flac", "ogg", "wav", "aac", "opus", "wma", "amr", "mid", "midi")
+            .forEach { put(it, FileKind.AUDIO) }
+        listOf(
+            "pdf", "doc", "docx", "xls", "xlsx", "ppt", "pptx", "txt", "odt", "ods", "odp",
+            "rtf", "csv", "epub", "md"
+        ).forEach { put(it, FileKind.DOCUMENT) }
+        listOf("zip", "rar", "7z", "tar", "gz", "tgz", "bz2", "xz")
+            .forEach { put(it, FileKind.ARCHIVE) }
+        put("apk", FileKind.APK)
+        put("apks", FileKind.APK)
+        put("xapk", FileKind.APK)
+    }
+
+    fun ext(name: String): String = name.substringAfterLast('/').substringAfterLast('.', "").lowercase()
+
+    fun kindOf(name: String): FileKind = map[ext(name)] ?: FileKind.OTHER
+
+    fun mimeOf(name: String): String =
+        android.webkit.MimeTypeMap.getSingleton().getMimeTypeFromExtension(ext(name)) ?: "*/*"
+}
+
+/**
+ * Reglas para no tocar nada sensible del sistema.
+ * - Android/data, Android/obb y .android_secure ni siquiera se muestran.
+ * - Las carpetas estándar (DCIM, Download, Music…), Android/, Android/media y las
+ *   carpetas de cada app dentro de Android/media no se pueden borrar, mover ni renombrar.
+ * - Los archivos .nomedia tampoco (controlan qué aparece en la galería).
+ */
+object Protection {
+    val rootPath: String = android.os.Environment.getExternalStorageDirectory().absolutePath
+
+    private val standardTop = setOf(
+        "Android", "DCIM", "Download", "Documents", "Pictures", "Music", "Movies",
+        "Alarms", "Notifications", "Podcasts", "Ringtones", "Audiobooks", "Recordings"
+    )
+    private val hiddenSystem = listOf(
+        "$rootPath/Android/data", "$rootPath/Android/obb", "$rootPath/.android_secure"
+    )
+
+    fun isHiddenSystem(path: String): Boolean =
+        hiddenSystem.any { path == it || path.startsWith("$it/") }
+
+    fun isProtected(path: String): Boolean {
+        if (path == rootPath) return true
+        val name = path.substringAfterLast('/')
+        if (name == ".nomedia") return true
+        if (isHiddenSystem(path)) return true
+        val parent = path.substringBeforeLast('/')
+        if (parent == rootPath && name in standardTop) return true
+        val android = "$rootPath/Android/"
+        if (path.startsWith(android)) {
+            // Android/media (0) y Android/media/<app> (1)
+            if (path.removePrefix(android).count { it == '/' } <= 1) return true
+        }
+        return false
+    }
+
+    fun relative(path: String): String = path.removePrefix("$rootPath/").let { if (it == rootPath) "" else it }
+}
