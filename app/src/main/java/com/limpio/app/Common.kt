@@ -101,8 +101,10 @@ fun ReviewList(
                 items(groups, key = { it.first().group }) { g ->
                     Card(Modifier.fillMaxWidth()) {
                         Text(
-                            "Grupo ${g.first().group + 1} · ${g.size} copias de " +
-                                formatSize(ctx, g.first().size),
+                            if (g.all { it.size == g.first().size })
+                                "Grupo ${g.first().group + 1} · ${g.size} copias de " +
+                                    formatSize(ctx, g.first().size)
+                            else "Grupo ${g.first().group + 1} · ${g.size} videos parecidos",
                             style = MaterialTheme.typography.labelLarge,
                             color = MaterialTheme.colorScheme.primary,
                             modifier = Modifier.padding(start = 14.dp, top = 12.dp, bottom = 4.dp)
@@ -178,7 +180,7 @@ fun ItemRow(item: CleanItem, checked: Boolean, onToggle: () -> Unit) {
             Text(
                 listOfNotNull(item.note, formatDate(item.lastModified)).joinToString(" · "),
                 style = MaterialTheme.typography.bodySmall,
-                color = if (item.note?.startsWith("Original") == true) MaterialTheme.colorScheme.primary
+                color = if (item.note?.startsWith("Original") == true || item.note?.startsWith("El más antiguo") == true) MaterialTheme.colorScheme.primary
                 else MaterialTheme.colorScheme.onSurfaceVariant
             )
         }

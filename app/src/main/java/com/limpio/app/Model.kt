@@ -30,6 +30,13 @@ enum class Category(val title: String, val description: String, val safe: Boolea
         "Copias idénticas byte por byte. De cada grupo se conserva la copia más antigua.",
         false
     ),
+    SIMILAR_VIDEOS(
+        "Videos parecidos",
+        "Videos con la misma duración y resolución aunque no sean idénticos byte por byte " +
+            "(por ejemplo, reenviados por WhatsApp o descargados dos veces). Ninguno viene " +
+            "marcado: toca la miniatura para verlos y decide tú.",
+        false
+    ),
     WHATSAPP_SENT(
         "Enviados de WhatsApp",
         "Copias de fotos, videos y documentos que tú enviaste. El chat no se borra.",
@@ -60,6 +67,8 @@ data class CleanItem(
 ) {
     val name: String get() = path.substringAfterLast('/')
 }
+
+val GROUPED_CATEGORIES = setOf(Category.DUPLICATES, Category.SIMILAR_VIDEOS)
 
 data class ScanResult(
     val items: Map<Category, List<CleanItem>>,

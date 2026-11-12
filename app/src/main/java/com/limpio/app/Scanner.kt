@@ -11,9 +11,6 @@ import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.withContext
 import java.io.File
-import java.io.FileInputStream
-import java.io.RandomAccessFile
-import java.security.MessageDigest
 import java.util.concurrent.ConcurrentLinkedQueue
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicInteger
@@ -34,8 +31,6 @@ class Scanner(private val context: Context) {
     private val androidMediaPath = "$rootPath/Android/media"
     private val androidObbPath = "$rootPath/Android/obb"
     private val downloadPrefix = "$rootPath/${Environment.DIRECTORY_DOWNLOADS}/"
-
-    private class FileRec(val path: String, val size: Long, val modified: Long)
 
     private val files = ConcurrentLinkedQueue<FileRec>()
     private val cache = ConcurrentLinkedQueue<CleanItem>()
@@ -85,7 +80,10 @@ class Scanner(private val context: Context) {
         ensureActive()
 
         // 3) Duplicados.
-        val duplicates = findDuplicates(all)
+        val duplicates = DuplicateFinder.find(all)
+        ensureActive()
+        val exact = duplicates.map { it.path }.toHashSet()
+        val similar = findSimilarVideos(all.filter { it.path !in exact })
 
         val bySizeDesc = compareByDescending<CleanItem> { it.size }
         val items = linkedMapOf<Category, List<CleanItem>>()
@@ -94,6 +92,7 @@ class Scanner(private val context: Context) {
         items[Category.EMPTY] = empties.sortedBy { it.path }
         items[Category.APKS] = apks.sortedWith(bySizeDesc)
         items[Category.DUPLICATES] = duplicates
+        items[Category.SIMILAR_VIDEOS] = similar
         items[Category.WHATSAPP_SENT] = waSent.sortedWith(bySizeDesc)
         items[Category.OLD_DOWNLOADS] = oldDownloads.sortedWith(bySizeDesc)
         items[Category.LARGE] = large.sortedWith(bySizeDesc)
@@ -229,52 +228,43 @@ class Scanner(private val context: Context) {
         }
     }
 
-    // ---------- Duplicados ----------
+    // ---------- Videos parecidos ----------
 
-    private suspend fun findDuplicates(all: List<FileRec>): List<CleanItem> = coroutineScope {
+    private class VideoInfo(val rec: FileRec, val durationMs: Long, val width: Int, val height: Int)
+
+    /** Agrupa videos con la misma resolución y duración (±1 s). */
+    private suspend fun findSimilarVideos(all: List<FileRec>): List<CleanItem> = coroutineScope {
+        val videos = all.filter { it.size >= 100 * 1024 && FileTypes.kindOf(it.path) == FileKind.VIDEO }
+        if (videos.size < 2) return@coroutineScope emptyList()
         val io = Dispatchers.IO.limitedParallelism(4)
-
-        // Paso 1: solo comparan archivos del mismo tamaño (no lee nada del disco).
-        val sameSize = all.asSequence()
-            .filter { it.size >= MIN_DUP_SIZE }
-            .groupBy { it.size }
-            .values.filter { it.size > 1 }
-            .flatten()
-
-        // Paso 2: hash de los primeros y últimos 32 KB.
-        val partial = sameSize.chunked(64).map { chunk ->
-            async(io) { chunk.mapNotNull { r -> partialHash(r)?.let { r to it } } }
+        val infos = videos.chunked(8).map { chunk ->
+            async(io) { chunk.mapNotNull { videoInfo(it) } }
         }.awaitAll().flatten()
-        val partialGroups = partial.groupBy({ "${it.first.size}:${it.second}" }, { it.first })
-            .values.filter { it.size > 1 }
 
-        // Paso 3: hash completo, solo si el archivo es más grande que lo ya leído.
-        val needFull = partialGroups.flatten().filter { it.size > 2 * PARTIAL_BYTES }
-        val fullHashes = needFull.chunked(16).map { chunk ->
-            async(io) { chunk.mapNotNull { r -> fullHash(r)?.let { r.path to it } } }
-        }.awaitAll().flatten().toMap()
-
-        val confirmed = ArrayList<List<FileRec>>()
-        for (g in partialGroups) {
-            if (g.first().size <= 2 * PARTIAL_BYTES) {
-                confirmed += g // el hash parcial ya cubrió todo el archivo
-            } else {
-                g.filter { fullHashes.containsKey(it.path) }
-                    .groupBy { fullHashes.getValue(it.path) }
-                    .values.filter { it.size > 1 }
-                    .forEach { confirmed += it }
+        val groups = ArrayList<List<VideoInfo>>()
+        infos.groupBy { minOf(it.width, it.height) to maxOf(it.width, it.height) }.values.forEach { sameRes ->
+            val sorted = sameRes.sortedBy { it.durationMs }
+            var current = arrayListOf(sorted.first())
+            for (v in sorted.drop(1)) {
+                if (v.durationMs - current.last().durationMs <= 1000) current.add(v)
+                else {
+                    if (current.size > 1) groups.add(current)
+                    current = arrayListOf(v)
+                }
             }
+            if (current.size > 1) groups.add(current)
         }
 
-        // Ordenar por espacio desperdiciado; conservar la copia más antigua de cada grupo.
         val result = ArrayList<CleanItem>()
-        confirmed.sortedByDescending { it.first().size * (it.size - 1) }
-            .forEachIndexed { gi, group ->
-                group.sortedBy { it.modified }.forEachIndexed { i, r ->
+        groups.sortedByDescending { g -> g.sumOf { it.rec.size } - g.maxOf { it.rec.size } }
+            .forEachIndexed { gi, g ->
+                g.sortedBy { it.rec.modified }.forEachIndexed { i, v ->
+                    val secs = v.durationMs / 1000
                     result += CleanItem(
-                        r.path, r.size, false, r.modified,
-                        preselected = i > 0,
-                        note = if (i == 0) "Original · se conserva" else "Copia",
+                        v.rec.path, v.rec.size, false, v.rec.modified,
+                        preselected = false,
+                        note = (if (i == 0) "El más antiguo · " else "") +
+                            "%d:%02d · %dx%d".format(secs / 60, secs % 60, v.width, v.height),
                         group = gi,
                     )
                 }
@@ -282,54 +272,23 @@ class Scanner(private val context: Context) {
         result
     }
 
-    private fun partialHash(r: FileRec): String? = try {
-        val md = MessageDigest.getInstance("MD5")
-        RandomAccessFile(r.path, "r").use { raf ->
-            val buf = ByteArray(PARTIAL_BYTES)
-            val len = raf.length()
-            var n = raf.read(buf, 0, minOf(PARTIAL_BYTES.toLong(), len).toInt())
-            if (n > 0) md.update(buf, 0, n)
-            if (len > PARTIAL_BYTES) {
-                val tailStart = maxOf(PARTIAL_BYTES.toLong(), len - PARTIAL_BYTES)
-                raf.seek(tailStart)
-                n = raf.read(buf, 0, (len - tailStart).toInt())
-                if (n > 0) md.update(buf, 0, n)
-            }
+    private fun videoInfo(r: FileRec): VideoInfo? {
+        val mmr = android.media.MediaMetadataRetriever()
+        return try {
+            mmr.setDataSource(r.path)
+            val d = mmr.extractMetadata(android.media.MediaMetadataRetriever.METADATA_KEY_DURATION)?.toLongOrNull()
+            val w = mmr.extractMetadata(android.media.MediaMetadataRetriever.METADATA_KEY_VIDEO_WIDTH)?.toIntOrNull()
+            val h = mmr.extractMetadata(android.media.MediaMetadataRetriever.METADATA_KEY_VIDEO_HEIGHT)?.toIntOrNull()
+            if (d == null || d < 1000 || w == null || h == null) null else VideoInfo(r, d, w, h)
+        } catch (e: Exception) {
+            null
+        } finally {
+            try { mmr.release() } catch (_: Exception) {}
         }
-        md.digest().toHex()
-    } catch (e: Exception) {
-        null
-    }
-
-    private fun fullHash(r: FileRec): String? = try {
-        val md = MessageDigest.getInstance("MD5")
-        FileInputStream(r.path).use { input ->
-            val buf = ByteArray(256 * 1024)
-            while (true) {
-                val n = input.read(buf)
-                if (n < 0) break
-                md.update(buf, 0, n)
-            }
-        }
-        md.digest().toHex()
-    } catch (e: Exception) {
-        null
-    }
-
-    private fun ByteArray.toHex(): String {
-        val hex = "0123456789abcdef"
-        val sb = StringBuilder(size * 2)
-        for (b in this) {
-            val v = b.toInt() and 0xff
-            sb.append(hex[v ushr 4]).append(hex[v and 0x0f])
-        }
-        return sb.toString()
     }
 
     companion object {
         private const val MAX_DEPTH = 48
-        private const val PARTIAL_BYTES = 32 * 1024
-        private const val MIN_DUP_SIZE = 4L * 1024
 
         private val CACHE_DIR_NAMES = setOf(
             ".thumbnails", ".cache", "cache", ".tmp", "tmp", ".temp", "temp", "lost.dir"

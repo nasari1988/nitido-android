@@ -28,6 +28,7 @@ import androidx.compose.material.icons.filled.FolderOff
 import androidx.compose.material.icons.filled.Inventory2
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.SdStorage
+import androidx.compose.material.icons.filled.VideoLibrary
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
@@ -59,6 +60,7 @@ fun categoryIcon(c: Category): ImageVector = when (c) {
     Category.EMPTY -> Icons.Filled.FolderOff
     Category.APKS -> Icons.Filled.Android
     Category.DUPLICATES -> Icons.Filled.ContentCopy
+    Category.SIMILAR_VIDEOS -> Icons.Filled.VideoLibrary
     Category.WHATSAPP_SENT -> Icons.AutoMirrored.Filled.Send
     Category.OLD_DOWNLOADS -> Icons.Filled.Download
     Category.LARGE -> Icons.Filled.SdStorage
@@ -74,6 +76,10 @@ fun CleanerTab(vm: MainViewModel) {
     val snackbar = remember { SnackbarHostState() }
     LaunchedEffect(vm.message) {
         vm.message?.let { snackbar.showSnackbar(it); vm.message = null }
+    }
+    // Si otra pestaña movió o borró archivos, el análisis se rehace solo.
+    LaunchedEffect(StorageChanges.version) {
+        if (vm.result != null && vm.onHome && vm.scannedVersion != StorageChanges.version) vm.scan()
     }
     val open = vm.openCategory
     val quick = vm.showQuick
@@ -126,7 +132,7 @@ fun CleanerTab(vm: MainViewModel) {
                     selected = vm.selection[open].orEmpty(),
                     onToggle = { vm.toggle(open, it) },
                     onSetAll = { vm.setAll(open, it) },
-                    grouped = open == Category.DUPLICATES,
+                    grouped = open in GROUPED_CATEGORIES,
                     destructive = true,
                     actionLabel = { n, s -> "Eliminar $n · ${formatSize(ctx, s)}" },
                     confirmTitle = { n -> "¿Eliminar $n elementos?" },

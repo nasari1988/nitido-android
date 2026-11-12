@@ -164,7 +164,8 @@ class ExplorerViewModel(app: Application) : AndroidViewModel(app) {
 
     fun toggleSelect(e: Entry) {
         if (e.isProtected) {
-            message = "\"${e.name}\" es del sistema y está protegido"
+            message = "\"${e.name}\" es una carpeta del sistema: puedes abrirla y manejar " +
+                "lo que tiene dentro, pero no borrarla, moverla ni renombrarla"
             return
         }
         selection = if (e.path in selection) selection - e.path else selection + e.path
@@ -215,6 +216,7 @@ class ExplorerViewModel(app: Application) : AndroidViewModel(app) {
             pending = null
             busy = false
             load()
+            StorageChanges.bump()
         }
     }
 
@@ -231,6 +233,7 @@ class ExplorerViewModel(app: Application) : AndroidViewModel(app) {
             selection = emptySet()
             busy = false
             load()
+            StorageChanges.bump()
         }
     }
 
@@ -248,6 +251,7 @@ class ExplorerViewModel(app: Application) : AndroidViewModel(app) {
             message = if (ok) "Renombrado" else "No se pudo renombrar"
             selection = emptySet()
             load()
+            StorageChanges.bump()
         }
     }
 
@@ -258,6 +262,7 @@ class ExplorerViewModel(app: Application) : AndroidViewModel(app) {
         if (f.exists()) { message = "Ya existe \"$n\""; return }
         message = if (f.mkdirs()) "Carpeta creada" else "No se pudo crear la carpeta"
         load()
+        StorageChanges.bump()
     }
 }
 
@@ -416,7 +421,8 @@ fun ExplorerTab(vm: ExplorerViewModel) {
                                 fontWeight = if (e.isDir) FontWeight.SemiBold else FontWeight.Normal
                             )
                             Text(
-                                (if (e.isDir) "${e.children} elementos" else formatSize(ctx, e.size)) +
+                                (if (e.isProtected) "Del sistema · " else "") +
+                                    (if (e.isDir) "${e.children} elementos" else formatSize(ctx, e.size)) +
                                     " · " + formatDate(e.modified),
                                 style = MaterialTheme.typography.bodySmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant

@@ -35,6 +35,14 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     var quickSelection by mutableStateOf<Set<String>>(emptySet())
         private set
     var message by mutableStateOf<String?>(null)
+    var scannedAt = 0L
+        private set
+    var scannedVersion = -1
+        private set
+
+    /** Si estás en la pantalla principal (no revisando una lista). */
+    val onHome: Boolean get() = openCategory == null && !showQuick
+
     var storageTotal by mutableStateOf(0L)
         private set
     var storageFree by mutableStateOf(0L)
@@ -56,6 +64,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     fun scan() {
         if (phase is Phase.Scanning || phase is Phase.Cleaning) return
         val scanner = Scanner(getApplication())
+        val version = StorageChanges.version
         phase = Phase.Scanning(0)
         viewModelScope.launch {
             val ticker = launch {
@@ -78,6 +87,8 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                 list.filter { it.preselected }.map { it.path }.toSet()
             }
             quickSelection = quickCleanItems().map { it.path }.toSet()
+            scannedAt = System.currentTimeMillis()
+            scannedVersion = version
             phase = Phase.Ready
             refreshStorage()
         }
@@ -146,6 +157,9 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                 FileOps.rescan(getApplication(), deleted)
             }
             removeFromResult(deleted)
+            // Nuestros propios borrados ya se reflejan en la lista: no hace falta reanalizar.
+            StorageChanges.bump()
+            scannedVersion = StorageChanges.version
             phase = Phase.Ready
             refreshStorage()
             message = buildString {
@@ -163,7 +177,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
 
         val newItems = r.items.mapValues { (cat, list) ->
             val kept = list.filterNot { gone(it.path) }
-            if (cat == Category.DUPLICATES) {
+            if (cat in GROUPED_CATEGORIES) {
                 // Un grupo con una sola copia ya no es duplicado.
                 kept.groupBy { it.group }.values.filter { it.size > 1 }.flatten()
             } else kept

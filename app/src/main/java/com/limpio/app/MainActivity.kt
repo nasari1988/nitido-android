@@ -86,6 +86,13 @@ class MainActivity : ComponentActivity() {
         super.onResume()
         hasPermission = checkPermission()
         cleaner.refreshStorage()
+        if (!hasPermission) return
+        // Al volver a la app los archivos pudieron cambiar desde otra app: actualizar.
+        if (cleaner.result != null && cleaner.onHome &&
+            System.currentTimeMillis() - cleaner.scannedAt > 20_000
+        ) cleaner.scan()
+        if (organizer.groups != null && organizer.open == null) organizer.scan()
+        explorer.load()
     }
 
     private fun checkPermission(): Boolean =

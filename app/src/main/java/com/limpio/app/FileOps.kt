@@ -6,7 +6,17 @@ import android.content.Intent
 import android.media.MediaScannerConnection
 import android.widget.Toast
 import androidx.core.content.FileProvider
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.setValue
 import java.io.File
+
+/** Cada vez que la app cambia archivos sube este número, para que las otras pestañas se actualicen. */
+object StorageChanges {
+    var version by androidx.compose.runtime.mutableIntStateOf(0)
+        private set
+
+    fun bump() { version++ }
+}
 
 object FileOps {
 

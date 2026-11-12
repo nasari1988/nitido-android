@@ -17,10 +17,16 @@ jobs:
           distribution: temurin
           java-version: 17
       - uses: gradle/actions/setup-gradle@v4
-      - name: Compilar
+      # Misma llave de firma en todas las compilaciones, para que las
+      # actualizaciones se instalen encima sin desinstalar.
+      - uses: actions/cache@v4
+        with:
+          path: ~/.android/debug.keystore
+          key: limpio-debug-keystore-v1
+      - name: Pruebas y compilación
         run: |
           chmod +x gradlew
-          ./gradlew assembleRelease --stacktrace
+          ./gradlew testDebugUnitTest assembleRelease --stacktrace
       - name: Renombrar
         run: cp app/build/outputs/apk/release/app-release.apk Limpio.apk
       - uses: actions/upload-artifact@v4

@@ -165,6 +165,7 @@ class OrganizerViewModel(app: Application) : AndroidViewModel(app) {
             message = "Moviste ${moved.size} archivos a ${rule.target}" +
                 if (failed > 0) " · $failed no se pudieron mover" else ""
             if (groups?.get(rule).isNullOrEmpty()) open = null
+            StorageChanges.bump()
         }
     }
 }
@@ -175,7 +176,7 @@ fun OrganizerTab(vm: OrganizerViewModel) {
     val ctx = LocalContext.current
     val snackbar = remember { SnackbarHostState() }
     LaunchedEffect(vm.message) { vm.message?.let { snackbar.showSnackbar(it); vm.message = null } }
-    LaunchedEffect(Unit) { if (vm.groups == null) vm.scan() }
+    LaunchedEffect(StorageChanges.version) { if (vm.groups == null || vm.open == null) vm.scan() }
     val open = vm.open
     BackHandler(enabled = open != null) { vm.open = null }
 
