@@ -33,6 +33,7 @@ jobs:
           case "${{ inputs.que }}" in
             realismo) bash ci/pisa_build.sh ;;
             limpiar) bash ci/rbvsr_build.sh ;;
+            limpiar-npu) bash ci/rbvsr_npu_build.sh ;;
             *) bash ci/rife_build.sh ;;
           esac
       # Limpiar (prueba): the checked weights for a private test run elsewhere; never published
