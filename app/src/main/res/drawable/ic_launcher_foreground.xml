@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Destellos de limpieza: una estrella grande y dos pequeñas -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M50,30 Q53,47 68,50 Q53,53 50,70 Q47,53 32,50 Q47,47 50,30 Z" />
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M70,32 Q71.5,38.5 77,40 Q71.5,41.5 70,48 Q68.5,41.5 63,40 Q68.5,38.5 70,32 Z" />
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M68,62 Q69,67 73,68 Q69,69 68,74 Q67,69 63,68 Q67,67 68,62 Z" />
+</vector>
