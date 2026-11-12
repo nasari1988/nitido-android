@@ -28,6 +28,7 @@ import androidx.compose.material.icons.filled.Computer
 import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.PieChart
 import androidx.compose.material.icons.filled.SdStorage
+import androidx.compose.material.icons.filled.Science
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
@@ -52,6 +53,7 @@ private data class Tool(
 )
 
 private val TOOLS = listOf(
+    Tool("test", "Autoprueba", "Revisa que todo funcione", Icons.Filled.Science, 0xFF00838F, true),
     Tool("dup", "Duplicados", "Idénticos y parecidos", Icons.Filled.ContentCopy, 0xFF1E6FD9, true),
     Tool("org", "Organizar", "Cada archivo a su carpeta", Icons.Filled.AutoAwesome, 0xFF7B3FBF, true),
     Tool("large", "Archivos grandes", "Más de 100 MB", Icons.Filled.SdStorage, 0xFFC2610C, true),
@@ -69,9 +71,11 @@ fun ToolsTab(
     onTool: (String?) -> Unit,
     dups: DupViewModel,
     organizer: OrganizerViewModel,
+    selfTest: SelfTestViewModel,
     onLargeFiles: () -> Unit,
 ) {
     when (tool) {
+        "test" -> SelfTestScreen(selfTest, onExit = { onTool(null) })
         "dup" -> DupTab(dups, onExit = { onTool(null) })
         "org" -> OrganizerTab(organizer, onExit = { onTool(null) })
         else -> ToolsHome { t ->

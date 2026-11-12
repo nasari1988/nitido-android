@@ -66,6 +66,7 @@ class MainActivity : ComponentActivity() {
     private val organizer: OrganizerViewModel by viewModels()
     private val browse: BrowseViewModel by viewModels()
     private val dups: DupViewModel by viewModels()
+    private val selfTest: SelfTestViewModel by viewModels()
     private var hasPermission by mutableStateOf(false)
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -82,7 +83,7 @@ class MainActivity : ComponentActivity() {
             ArchivosTheme {
                 Box(Modifier.fillMaxSize()) {
                     GlassBackground()
-                    if (hasPermission) ArchivosApp(browse, cleaner, dups, organizer)
+                    if (hasPermission) ArchivosApp(browse, cleaner, dups, organizer, selfTest)
                     else PermissionScreen()
                 }
             }
@@ -168,6 +169,7 @@ fun ArchivosApp(
     cleaner: MainViewModel,
     dups: DupViewModel,
     organizer: OrganizerViewModel,
+    selfTest: SelfTestViewModel,
 ) {
     var tab by rememberSaveable { mutableIntStateOf(0) }
     var tool by rememberSaveable { mutableStateOf<String?>(null) }
@@ -203,6 +205,7 @@ fun ArchivosApp(
                         onTool = { tool = it },
                         dups = dups,
                         organizer = organizer,
+                        selfTest = selfTest,
                         onLargeFiles = {
                             cleaner.openWhenReady(Category.LARGE)
                             tab = 1
