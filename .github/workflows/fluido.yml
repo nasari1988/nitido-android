@@ -35,6 +35,13 @@ jobs:
             limpiar) bash ci/rbvsr_build.sh ;;
             *) bash ci/rife_build.sh ;;
           esac
+      # Limpiar (prueba): the checked weights for a private test run elsewhere; never published
+      - if: ${{ inputs.que == 'limpiar' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: pesos-limpiar
+          path: dl/rbvsr.pth
+          retention-days: 1
       - uses: actions/upload-artifact@v4
         with:
           name: modelo-${{ inputs.que }}
