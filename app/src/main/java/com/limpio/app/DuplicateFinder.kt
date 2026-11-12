@@ -20,7 +20,11 @@ object DuplicateFinder {
     const val MIN_DUP_SIZE = 4L * 1024
 
 
-    suspend fun find(all: List<FileRec>): List<CleanItem> = coroutineScope {
+    suspend fun find(
+        all: List<FileRec>,
+        onTotal: (Int) -> Unit = {},
+        onStep: () -> Unit = {},
+    ): List<CleanItem> = coroutineScope {
         val io = Dispatchers.IO.limitedParallelism(4)
 
         // Paso 1: solo comparan archivos del mismo tamaño (no lee nada del disco).
@@ -29,18 +33,20 @@ object DuplicateFinder {
             .groupBy { it.size }
             .values.filter { it.size > 1 }
             .flatten()
+        onTotal(sameSize.size)
 
         // Paso 2: hash de los primeros y últimos 32 KB.
         val partial = sameSize.chunked(64).map { chunk ->
-            async(io) { chunk.mapNotNull { r -> partialHash(r)?.let { r to it } } }
+            async(io) { chunk.mapNotNull { r -> partialHash(r).also { onStep() }?.let { r to it } } }
         }.awaitAll().flatten()
         val partialGroups = partial.groupBy({ "${it.first.size}:${it.second}" }, { it.first })
             .values.filter { it.size > 1 }
 
         // Paso 3: hash completo, solo si el archivo es más grande que lo ya leído.
         val needFull = partialGroups.flatten().filter { it.size > 2 * PARTIAL_BYTES }
+        onTotal(needFull.size)
         val fullHashes = needFull.chunked(16).map { chunk ->
-            async(io) { chunk.mapNotNull { r -> fullHash(r)?.let { r.path to it } } }
+            async(io) { chunk.mapNotNull { r -> fullHash(r).also { onStep() }?.let { r.path to it } } }
         }.awaitAll().flatten().toMap()
 
         val confirmed = ArrayList<List<FileRec>>()

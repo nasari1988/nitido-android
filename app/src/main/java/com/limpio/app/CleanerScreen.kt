@@ -39,6 +39,8 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
@@ -180,9 +182,9 @@ private fun CleanerHome(vm: MainViewModel) {
                         Modifier.fillMaxWidth().padding(24.dp),
                         horizontalAlignment = Alignment.CenterHorizontally
                     ) {
-                        CircularProgressIndicator()
-                        Spacer(Modifier.height(16.dp))
-                        Text("Analizando… ${p.count} archivos")
+                        ProgressBlock(p, "${p.count} archivos encontrados")
+                        Spacer(Modifier.height(12.dp))
+                        OutlinedButton(onClick = { vm.cancelScan() }) { Text("Cancelar") }
                     }
                 }
             }
@@ -245,9 +247,48 @@ private fun CleanerHome(vm: MainViewModel) {
             }
             items(Category.entries.toList()) { cat ->
                 val list = result.items[cat].orEmpty()
-                CategoryCard(cat, list.size, vm.totalSize(cat)) { vm.openCategory = cat }
+                val sp = vm.similarProgress
+                if (cat == Category.SIMILAR_VIDEOS && sp != null) {
+                    Card(Modifier.fillMaxWidth()) {
+                        Column(Modifier.padding(16.dp)) {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Icon(categoryIcon(cat), null, tint = MaterialTheme.colorScheme.primary)
+                                Spacer(Modifier.width(16.dp))
+                                Text(
+                                    cat.title, style = MaterialTheme.typography.titleSmall,
+                                    fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f)
+                                )
+                                TextButton(onClick = { vm.cancelSimilar() }) { Text("Omitir") }
+                            }
+                            Spacer(Modifier.height(8.dp))
+                            ProgressBlock(sp, "Puedes usar lo demás mientras tanto")
+                        }
+                    }
+                } else {
+                    CategoryCard(cat, list.size, vm.totalSize(cat)) { vm.openCategory = cat }
+                }
             }
         }
+    }
+}
+
+@Composable
+private fun ProgressBlock(p: Phase.Scanning, detail: String) {
+    Column(Modifier.fillMaxWidth(), horizontalAlignment = Alignment.CenterHorizontally) {
+        Text(p.stage.ifEmpty { "Analizando…" }, style = MaterialTheme.typography.titleSmall)
+        Spacer(Modifier.height(8.dp))
+        if (p.total > 0) {
+            LinearProgressIndicator(
+                progress = { (p.done.toFloat() / p.total).coerceIn(0f, 1f) },
+                modifier = Modifier.fillMaxWidth()
+            )
+            Spacer(Modifier.height(4.dp))
+            Text("${p.done} de ${p.total}", style = MaterialTheme.typography.bodySmall)
+        } else {
+            LinearProgressIndicator(Modifier.fillMaxWidth())
+        }
+        Spacer(Modifier.height(4.dp))
+        Text(detail, style = MaterialTheme.typography.bodySmall)
     }
 }
 

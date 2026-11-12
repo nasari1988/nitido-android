@@ -17,7 +17,7 @@ import java.io.File
 
 sealed interface Phase {
     data object Idle : Phase
-    data class Scanning(val count: Int) : Phase
+    data class Scanning(val count: Int, val stage: String = "", val done: Int = 0, val total: Int = 0) : Phase
     data object Ready : Phase
     data class Cleaning(val done: Int, val total: Int) : Phase
 }
@@ -43,6 +43,12 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     /** Si estás en la pantalla principal (no revisando una lista). */
     val onHome: Boolean get() = openCategory == null && !showQuick
 
+    /** Avance de la comparación de videos en segundo plano (null = no está corriendo). */
+    var similarProgress by mutableStateOf<Phase.Scanning?>(null)
+        private set
+    private var scanJob: kotlinx.coroutines.Job? = null
+    private var similarJob: kotlinx.coroutines.Job? = null
+
     var storageTotal by mutableStateOf(0L)
         private set
     var storageFree by mutableStateOf(0L)
@@ -63,22 +69,30 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
 
     fun scan() {
         if (phase is Phase.Scanning || phase is Phase.Cleaning) return
+        similarJob?.cancel()
+        similarProgress = null
         val scanner = Scanner(getApplication())
         val version = StorageChanges.version
         phase = Phase.Scanning(0)
-        viewModelScope.launch {
+        scanJob = viewModelScope.launch {
             val ticker = launch {
                 while (isActive) {
-                    phase = Phase.Scanning(scanner.scanned.get())
-                    delay(120)
+                    phase = Phase.Scanning(
+                        scanner.scanned.get(), scanner.stage,
+                        scanner.stepDone.get(), scanner.stepTotal.get()
+                    )
+                    delay(150)
                 }
             }
             val r = try {
                 scanner.scan()
+            } catch (e: kotlinx.coroutines.CancellationException) {
+                ticker.cancel()
+                throw e
             } catch (e: Exception) {
                 ticker.cancel()
                 message = "Error al analizar: ${e.message}"
-                phase = Phase.Idle
+                phase = if (result != null) Phase.Ready else Phase.Idle
                 return@launch
             }
             ticker.cancel()
@@ -91,6 +105,48 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
             scannedVersion = version
             phase = Phase.Ready
             refreshStorage()
+            startSimilar(scanner)
+        }
+    }
+
+    fun cancelScan() {
+        scanJob?.cancel()
+        phase = if (result != null) Phase.Ready else Phase.Idle
+    }
+
+    fun cancelSimilar() {
+        similarJob?.cancel()
+        similarProgress = null
+    }
+
+    /** Videos parecidos: corre después, sin bloquear el resto de los resultados. */
+    private fun startSimilar(scanner: Scanner) {
+        if (scanner.similarInput.size < 2) return
+        similarJob = viewModelScope.launch {
+            similarProgress = Phase.Scanning(0, "Preparando videos")
+            val ticker = launch {
+                while (isActive) {
+                    similarProgress = Phase.Scanning(
+                        0, scanner.stage, scanner.stepDone.get(), scanner.stepTotal.get()
+                    )
+                    delay(200)
+                }
+            }
+            try {
+                val found = scanner.similarVideos()
+                    .filter { File(it.path).exists() }
+                    .groupBy { it.group }.values.filter { it.size > 1 }.flatten()
+                val r = result ?: return@launch
+                result = r.copy(items = r.items + (Category.SIMILAR_VIDEOS to found))
+                selection = selection + (Category.SIMILAR_VIDEOS to emptySet())
+            } catch (e: kotlinx.coroutines.CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                message = "No se pudieron comparar los videos: ${e.message}"
+            } finally {
+                ticker.cancel()
+                similarProgress = null
+            }
         }
     }
 
