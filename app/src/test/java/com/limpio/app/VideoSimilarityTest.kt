@@ -13,7 +13,10 @@ class VideoSimilarityTest {
         VideoSimilarity.Meta(FileRec("/v$i.mp4", 1_000_000, i.toLong()), durationMs, w, h)
 
     /** Una "escena" aleatoria de 9x8 en grises. */
-    private fun scene(seed: Int) = IntArray(72) { Random(seed * 1000 + it).nextInt(256) }
+    private fun scene(seed: Int): IntArray {
+        val r = Random(seed)
+        return IntArray(72) { r.nextInt(256) }
+    }
 
     /** La misma escena con un poco de ruido, como al recodificar. */
     private fun reencoded(g: IntArray, seed: Int): IntArray {
