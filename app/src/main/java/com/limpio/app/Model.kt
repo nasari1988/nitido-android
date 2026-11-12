@@ -32,9 +32,9 @@ enum class Category(val title: String, val description: String, val safe: Boolea
     ),
     SIMILAR_VIDEOS(
         "Videos parecidos",
-        "Videos con la misma duración y resolución aunque no sean idénticos byte por byte " +
-            "(por ejemplo, reenviados por WhatsApp o descargados dos veces). Ninguno viene " +
-            "marcado: toca la miniatura para verlos y decide tú.",
+        "Videos que se ven igual aunque no sean idénticos byte por byte (reenviados, " +
+            "descargados dos veces o en otra resolución). Se comparan fotogramas del inicio, " +
+            "medio y final. Ninguno viene marcado: toca la miniatura para verlos y decide tú.",
         false
     ),
     WHATSAPP_SENT(

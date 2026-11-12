@@ -3,6 +3,9 @@ package com.limpio.app
 import android.content.Context
 import android.content.pm.PackageManager
 import android.os.Environment
+import android.graphics.Bitmap
+import android.media.MediaMetadataRetriever
+import android.os.Build
 import androidx.core.content.pm.PackageInfoCompat
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
@@ -230,41 +233,105 @@ class Scanner(private val context: Context) {
 
     // ---------- Videos parecidos ----------
 
-    private class VideoInfo(val rec: FileRec, val durationMs: Long, val width: Int, val height: Int)
+    private class VideoSig(val durationMs: Long, val width: Int, val height: Int, val hashes: List<Long?>?)
 
-    /** Agrupa videos con la misma resolución y duración (±1 s). */
+    /** Huellas guardadas entre análisis (clave: ruta, tamaño y fecha), para no volver a decodificar. */
+    private val sigCacheFile = File(context.cacheDir, "video_sigs_v1.tsv")
+    private val sigCache = java.util.concurrent.ConcurrentHashMap<String, VideoSig>()
+
+    private fun sigKey(r: FileRec) = "${r.path}|${r.size}|${r.modified}"
+
+    private fun loadSigCache() {
+        try {
+            if (!sigCacheFile.exists()) return
+            sigCacheFile.forEachLine { line ->
+                val p = line.split('\t')
+                if (p.size == 5) {
+                    val hashes = if (p[4] == "?") null else p[4].split(',').map { it.toLongOrNull() }
+                    sigCache[p[0]] = VideoSig(p[1].toLong(), p[2].toInt(), p[3].toInt(), hashes)
+                }
+            }
+        } catch (_: Exception) {
+            sigCache.clear()
+        }
+    }
+
+    private fun saveSigCache(keep: Set<String>) {
+        try {
+            sigCacheFile.bufferedWriter().use { w ->
+                for ((k, v) in sigCache) {
+                    if (k !in keep) continue
+                    val h = v.hashes?.joinToString(",") { it?.toString() ?: "-" } ?: "?"
+                    w.write("$k\t${v.durationMs}\t${v.width}\t${v.height}\t$h\n")
+                }
+            }
+        } catch (_: Exception) {
+        }
+    }
+
     private suspend fun findSimilarVideos(all: List<FileRec>): List<CleanItem> = coroutineScope {
         val videos = all.filter { it.size >= 100 * 1024 && FileTypes.kindOf(it.path) == FileKind.VIDEO }
         if (videos.size < 2) return@coroutineScope emptyList()
+        loadSigCache()
         val io = Dispatchers.IO.limitedParallelism(4)
-        val infos = videos.chunked(8).map { chunk ->
-            async(io) { chunk.mapNotNull { videoInfo(it) } }
-        }.awaitAll().flatten()
 
-        val groups = ArrayList<List<VideoInfo>>()
-        infos.groupBy { minOf(it.width, it.height) to maxOf(it.width, it.height) }.values.forEach { sameRes ->
-            val sorted = sameRes.sortedBy { it.durationMs }
-            var current = arrayListOf(sorted.first())
-            for (v in sorted.drop(1)) {
-                if (v.durationMs - current.last().durationMs <= 1000) current.add(v)
-                else {
-                    if (current.size > 1) groups.add(current)
-                    current = arrayListOf(v)
+        // 1) Duración y resolución (rápido, de los metadatos).
+        val metas = videos.chunked(8).map { chunk ->
+            async(io) {
+                chunk.mapNotNull { r ->
+                    val key = sigKey(r)
+                    val sig = sigCache[key] ?: readMeta(r)?.also { sigCache[key] = it }
+                    sig?.takeIf { it.durationMs >= 1000 && it.width > 0 && it.height > 0 }
+                        ?.let { VideoSimilarity.Meta(r, it.durationMs, it.width, it.height) }
                 }
             }
-            if (current.size > 1) groups.add(current)
+        }.awaitAll().flatten()
+
+        // 2) Solo los que tienen pareja posible pasan a la comparación visual.
+        val pairs = VideoSimilarity.candidatePairs(metas)
+        val needed = pairs.flatMap { listOf(it.first, it.second) }.distinct()
+        val hashes = HashMap<Int, List<Long?>>()
+        needed.chunked(4).map { chunk ->
+            async(io) {
+                chunk.map { i ->
+                    val m = metas[i]
+                    val key = sigKey(m.rec)
+                    val cached = sigCache[key]
+                    val h = cached?.hashes ?: frameHashes(m.rec.path, m.durationMs).also {
+                        sigCache[key] = VideoSig(m.durationMs, m.width, m.height, it)
+                    }
+                    i to h
+                }
+            }
+        }.awaitAll().flatten().forEach { (i, h) -> hashes[i] = h }
+        ensureActive()
+
+        // 3) Confirmar pares que se ven igual y agruparlos.
+        val confirmed = HashMap<Pair<Int, Int>, Int>()
+        for (p in pairs) {
+            val d = VideoSimilarity.distance(hashes[p.first].orEmpty(), hashes[p.second].orEmpty())
+            if (d != null) confirmed[p] = d
+        }
+        val groups = VideoSimilarity.groups(metas.size, confirmed.keys.toList())
+        saveSigCache(videos.map { sigKey(it) }.toSet())
+
+        fun bestPercent(i: Int): Int {
+            val best = confirmed.filterKeys { it.first == i || it.second == i }.values.minOrNull() ?: 64
+            return VideoSimilarity.similarityPercent(best)
         }
 
         val result = ArrayList<CleanItem>()
-        groups.sortedByDescending { g -> g.sumOf { it.rec.size } - g.maxOf { it.rec.size } }
+        groups.map { g -> g.map { metas[it] to it } }
+            .sortedByDescending { g -> g.sumOf { it.first.rec.size } - g.maxOf { it.first.rec.size } }
             .forEachIndexed { gi, g ->
-                g.sortedBy { it.rec.modified }.forEachIndexed { i, v ->
-                    val secs = v.durationMs / 1000
+                g.sortedBy { it.first.rec.modified }.forEachIndexed { k, (m, idx) ->
+                    val secs = m.durationMs / 1000
                     result += CleanItem(
-                        v.rec.path, v.rec.size, false, v.rec.modified,
+                        m.rec.path, m.rec.size, false, m.rec.modified,
                         preselected = false,
-                        note = (if (i == 0) "El más antiguo · " else "") +
-                            "%d:%02d · %dx%d".format(secs / 60, secs % 60, v.width, v.height),
+                        note = (if (k == 0) "El más antiguo · " else "") +
+                            "Parecido ${bestPercent(idx)}% · " +
+                            "%d:%02d · %dx%d".format(secs / 60, secs % 60, m.width, m.height),
                         group = gi,
                     )
                 }
@@ -272,16 +339,50 @@ class Scanner(private val context: Context) {
         result
     }
 
-    private fun videoInfo(r: FileRec): VideoInfo? {
-        val mmr = android.media.MediaMetadataRetriever()
+    private fun readMeta(r: FileRec): VideoSig? {
+        val mmr = MediaMetadataRetriever()
         return try {
             mmr.setDataSource(r.path)
-            val d = mmr.extractMetadata(android.media.MediaMetadataRetriever.METADATA_KEY_DURATION)?.toLongOrNull()
-            val w = mmr.extractMetadata(android.media.MediaMetadataRetriever.METADATA_KEY_VIDEO_WIDTH)?.toIntOrNull()
-            val h = mmr.extractMetadata(android.media.MediaMetadataRetriever.METADATA_KEY_VIDEO_HEIGHT)?.toIntOrNull()
-            if (d == null || d < 1000 || w == null || h == null) null else VideoInfo(r, d, w, h)
+            val d = mmr.extractMetadata(MediaMetadataRetriever.METADATA_KEY_DURATION)?.toLongOrNull()
+            val w = mmr.extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_WIDTH)?.toIntOrNull()
+            val h = mmr.extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_HEIGHT)?.toIntOrNull()
+            if (d == null || w == null || h == null) null else VideoSig(d, w, h, null)
         } catch (e: Exception) {
             null
+        } finally {
+            try { mmr.release() } catch (_: Exception) {}
+        }
+    }
+
+    /** Huella de 3 fotogramas: cada uno se reduce a 9x8 en grises y se calcula su dHash. */
+    private fun frameHashes(path: String, durationMs: Long): List<Long?> {
+        val mmr = MediaMetadataRetriever()
+        return try {
+            mmr.setDataSource(path)
+            VideoSimilarity.FRAME_POSITIONS.map { f ->
+                val timeUs = (durationMs * f * 1000).toLong()
+                try {
+                    val frame = if (Build.VERSION.SDK_INT >= 27) {
+                        mmr.getScaledFrameAtTime(timeUs, MediaMetadataRetriever.OPTION_CLOSEST_SYNC, 96, 96)
+                    } else {
+                        mmr.getFrameAtTime(timeUs, MediaMetadataRetriever.OPTION_CLOSEST_SYNC)
+                    } ?: return@map null
+                    val small = Bitmap.createScaledBitmap(frame, 9, 8, true)
+                    val px = IntArray(72)
+                    small.getPixels(px, 0, 9, 0, 0, 9, 8)
+                    if (small !== frame) small.recycle()
+                    frame.recycle()
+                    val gray = IntArray(72) { k ->
+                        val c = px[k]
+                        (((c shr 16) and 0xff) * 299 + ((c shr 8) and 0xff) * 587 + (c and 0xff) * 114) / 1000
+                    }
+                    VideoSimilarity.dHash(gray)
+                } catch (e: Exception) {
+                    null
+                }
+            }
+        } catch (e: Exception) {
+            List(VideoSimilarity.FRAME_POSITIONS.size) { null }
         } finally {
             try { mmr.release() } catch (_: Exception) {}
         }
