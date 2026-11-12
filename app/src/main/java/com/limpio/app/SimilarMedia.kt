@@ -196,6 +196,7 @@ class SimilarMedia(private val context: Context, private val progress: Progress)
                         result += CleanItem(
                             m.rec.path, m.rec.size, false, m.rec.modified,
                             preselected = false,
+                            pixels = m.width.toLong() * m.height,
                             detail = "Parecido ${bestPercent(idx)}% · " +
                                 "%d:%02d · %dx%d".format(secs / 60, secs % 60, m.width, m.height),
                             group = gi,
@@ -280,9 +281,9 @@ class SimilarMedia(private val context: Context, private val progress: Progress)
 
     // ---------- Fotos parecidas ----------
 
-    private class PhotoSig(val ratio: Double, val hash: Long?)
+    private class PhotoSig(val ratio: Double, val hash: Long?, val width: Int = 0, val height: Int = 0)
 
-    private val photoCacheFile = File(context.cacheDir, "photo_sigs_v1.tsv")
+    private val photoCacheFile = File(context.cacheDir, "photo_sigs_v2.tsv")
     private val photoCache = java.util.concurrent.ConcurrentHashMap<String, PhotoSig>()
 
     private fun loadPhotoCache() {
@@ -290,7 +291,9 @@ class SimilarMedia(private val context: Context, private val progress: Progress)
             if (!photoCacheFile.exists()) return
             photoCacheFile.forEachLine { line ->
                 val p = line.split('\t')
-                if (p.size == 3) photoCache[p[0]] = PhotoSig(p[1].toDouble(), p[2].toLongOrNull())
+                if (p.size == 5) {
+                    photoCache[p[0]] = PhotoSig(p[1].toDouble(), p[2].toLongOrNull(), p[3].toInt(), p[4].toInt())
+                }
             }
         } catch (_: Exception) {
             photoCache.clear()
@@ -301,7 +304,7 @@ class SimilarMedia(private val context: Context, private val progress: Progress)
         try {
             photoCacheFile.bufferedWriter().use { w ->
                 for ((k, v) in photoCache) {
-                    if (k in keep) w.write("$k\t${v.ratio}\t${v.hash ?: "-"}\n")
+                    if (k in keep) w.write("$k\t${v.ratio}\t${v.hash ?: "-"}\t${v.width}\t${v.height}\n")
                 }
             }
         } catch (_: Exception) {
@@ -347,9 +350,12 @@ class SimilarMedia(private val context: Context, private val progress: Progress)
                 .forEachIndexed { gi, g ->
                     g.sortedBy { photos[it].modified }.forEach { i ->
                         val r = photos[i]
+                        val sig = sigs[i]
                         result += CleanItem(
                             r.path, r.size, false, r.modified, preselected = false,
-                            detail = "Parecida ${bestPercent(i)}%", group = gi,
+                            detail = "${sig.width}x${sig.height} · Parecida ${bestPercent(i)}%",
+                            pixels = sig.width.toLong() * sig.height,
+                            group = gi,
                         )
                     }
                 }
@@ -372,7 +378,7 @@ class SimilarMedia(private val context: Context, private val progress: Progress)
                 val hash = bitmapDHash(rotated)
                 if (rotated !== bmp) rotated.recycle()
                 bmp.recycle()
-                PhotoSig(minOf(w, h).toDouble() / maxOf(w, h), hash)
+                PhotoSig(minOf(w, h).toDouble() / maxOf(w, h), hash, w, h)
             }
         }
     } catch (e: Exception) {

@@ -16,6 +16,7 @@ enum class DupKind(val label: String, val kinds: Set<FileKind>) {
 }
 
 enum class KeepRule(val label: String, val description: String) {
+    BEST("La de mejor calidad", "Mayor resolución y, si empatan, el archivo más pesado. En copias idénticas, el original"),
     ORIGINAL("El original", "Prefiere la copia de tu cámara o tus carpetas sobre la de WhatsApp, Telegram o Descargas"),
     OLDEST("El más antiguo", "Conserva la copia con la fecha más vieja"),
     NEWEST("El más reciente", "Conserva la copia con la fecha más nueva"),
@@ -36,7 +37,7 @@ data class DupOptions(
     val kinds: Set<DupKind> = DupKind.entries.toSet(),
     val minSize: Long = 100L * 1024,
     val includeHidden: Boolean = false,
-    val keep: KeepRule = KeepRule.ORIGINAL,
+    val keep: KeepRule = KeepRule.BEST,
 ) {
     val canSearch: Boolean
         get() = (exact && kinds.isNotEmpty() || videos || photos) && (wholeDevice || folders.isNotEmpty())
@@ -60,6 +61,12 @@ object Keep {
     fun pick(group: List<CleanItem>, rule: KeepRule): String = when (rule) {
         KeepRule.OLDEST -> group.minBy { it.lastModified }
         KeepRule.NEWEST -> group.maxBy { it.lastModified }
+        KeepRule.BEST -> group.sortedWith(
+            compareByDescending<CleanItem> { it.pixels }
+                .thenByDescending { it.size }
+                .thenByDescending { originScore(it.path) }
+                .thenBy { it.lastModified }
+        ).first()
         KeepRule.ORIGINAL -> group.sortedWith(
             compareByDescending<CleanItem> { originScore(it.path) }.thenBy { it.lastModified }
         ).first()
@@ -181,7 +188,7 @@ object DupPrefs {
                 ?.mapNotNull { n -> DupKind.entries.firstOrNull { it.name == n } }?.toSet() ?: d.kinds,
             minSize = p.getLong("minSize", d.minSize),
             includeHidden = p.getBoolean("hidden", d.includeHidden),
-            keep = KeepRule.entries.firstOrNull { it.name == p.getString("keep", null) } ?: d.keep,
+            keep = KeepRule.entries.firstOrNull { it.name == p.getString("keepRule", null) } ?: d.keep,
         )
     }
 
@@ -195,7 +202,7 @@ object DupPrefs {
             .putStringSet("kinds", o.kinds.map { it.name }.toSet())
             .putLong("minSize", o.minSize)
             .putBoolean("hidden", o.includeHidden)
-            .putString("keep", o.keep.name)
+            .putString("keepRule", o.keep.name)
             .apply()
     }
 }

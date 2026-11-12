@@ -32,6 +32,7 @@ import androidx.compose.material.icons.filled.Folder
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Tune
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.AssistChip
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -160,6 +161,14 @@ class DupViewModel(app: Application) : AndroidViewModel(app) {
         val others = group.map { it.path }.filter { it != item.path }
         val cur = selection[s].orEmpty() - group.map { it.path }.toSet()
         selection = selection + (s to cur + others)
+    }
+
+    /** Selección rápida: aplica una regla a TODOS los grupos de la sección y marca las demás copias. */
+    fun applyRuleAll(s: DupSection, rule: KeepRule) {
+        val r = results ?: return
+        val list = Keep.applyRule(r[s].orEmpty(), rule, markOthers = true, exact = s == DupSection.EXACT)
+        results = r + (s to list)
+        selection = selection + (s to list.filter { it.preselected }.map { it.path }.toSet())
     }
 
     /** Grupos en los que se marcaron TODAS las copias (se perdería el archivo por completo). */
@@ -302,13 +311,30 @@ private fun DupResults(vm: DupViewModel, results: Map<DupSection, List<CleanItem
             }
             return@Column
         }
+        Row(
+            Modifier.fillMaxWidth().horizontalScroll(rememberScrollState())
+                .padding(horizontal = 12.dp, vertical = 4.dp),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text("Selección rápida:", style = MaterialTheme.typography.labelMedium)
+            listOf(
+                KeepRule.BEST to "Conservar mejor calidad",
+                KeepRule.ORIGINAL to "Conservar original",
+                KeepRule.OLDEST to "Conservar más antiguo",
+                KeepRule.NEWEST to "Conservar más reciente",
+            ).forEach { (rule, label) ->
+                AssistChip(onClick = { vm.applyRuleAll(s, rule) }, label = { Text(label) })
+            }
+            AssistChip(onClick = { vm.setAll(s, false) }, label = { Text("Desmarcar todo") })
+        }
         val groups = items.groupBy { it.group }.values
         val recoverable = groups.sumOf { g -> g.filterNot { it.note?.startsWith(Keep.KEPT_TAG) == true }.sumOf { it.size } }
         ReviewList(
             header = "${groups.size} grupos · hasta ${formatSize(ctx, recoverable)} recuperables. " +
                 when (s) {
                     DupSection.EXACT -> "Las copias vienen marcadas; la que dice \"Se conserva\" no."
-                    else -> "Nada viene marcado: compara las miniaturas y toca \"Conservar este\" en el bueno."
+                    else -> "Nada viene marcado: usa la selección rápida o toca \"Conservar este\" en el bueno."
                 },
             items = items,
             selected = vm.selection[s].orEmpty(),

@@ -52,6 +52,8 @@ data class CleanItem(
     val note: String? = null,
     /** Dato extra (p. ej. "Parecido 97% · 0:15"); la etiqueta final se arma en [note]. */
     val detail: String? = null,
+    /** Resolución (ancho × alto) para elegir la de mejor calidad; 0 si no aplica. */
+    val pixels: Long = 0,
     /** Grupo de duplicados; -1 si no aplica. */
     val group: Int = -1,
 ) {

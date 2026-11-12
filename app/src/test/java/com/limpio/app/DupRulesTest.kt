@@ -24,6 +24,20 @@ class DupRulesTest {
     }
 
     @Test
+    fun mejorCalidadPrefiereMayorResolucionYLuegoMasPeso() {
+        val whatsapp = CleanItem("/x/WhatsApp/Media/VID-1.mp4", 3_000_000, false, 1, true, pixels = 848L * 480)
+        val camara = CleanItem("/x/DCIM/Camera/VID_1.mp4", 40_000_000, false, 9, true, pixels = 1920L * 1080)
+        val camaraLigera = CleanItem("/x/Movies/VID_1.mp4", 20_000_000, false, 5, true, pixels = 1920L * 1080)
+        assertEquals(camara.path, Keep.pick(listOf(whatsapp, camaraLigera, camara), KeepRule.BEST))
+        // Copias idénticas (misma resolución y peso): gana el original.
+        val g = listOf(
+            item("/storage/emulated/0/Download/a.jpg", 1),
+            item("/storage/emulated/0/DCIM/Camera/a.jpg", 9),
+        )
+        assertEquals(g[1].path, Keep.pick(g, KeepRule.BEST))
+    }
+
+    @Test
     fun etiquetasYMarcado() {
         val g = listOf(item("/a/x.jpg", 1), item("/b/y.jpg", 2), item("/c/z.jpg", 3))
         val exact = Keep.label(g, "/b/y.jpg", markOthers = true, exact = true)
