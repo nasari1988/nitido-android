@@ -498,7 +498,7 @@ class BrowseViewModel(app: Application) : AndroidViewModel(app) {
 
     fun toggleFavorite(path: String) {
         val adding = path !in favorites
-        setFavorites(if (adding) favorites + path else favorites - path)
+        saveFavorites(if (adding) favorites + path else favorites - path)
         message = if (adding) "Agregado a favoritos" else "Quitado de favoritos"
         selection = emptySet()
         if (screen == Screen.Home) loadHome()
