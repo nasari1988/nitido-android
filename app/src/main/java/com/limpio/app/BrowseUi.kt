@@ -61,6 +61,7 @@ import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.Link
 import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.MoreVert
+import androidx.compose.material.icons.filled.Palette
 import androidx.compose.material.icons.filled.PhoneAndroid
 import androidx.compose.material.icons.filled.SdCard
 import androidx.compose.material.icons.filled.Search
@@ -78,6 +79,8 @@ import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.RadioButton
+import androidx.compose.material3.Switch
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -175,6 +178,9 @@ fun BrowseTab(vm: BrowseViewModel, cleanable: Long? = null, onClean: () -> Unit)
 @Composable
 private fun HomeScreen(vm: BrowseViewModel, cleanable: Long?, onClean: () -> Unit) {
     val ctx = LocalContext.current
+    var showAppearance by remember { mutableStateOf(false) }
+    if (showAppearance) AppearanceDialog { showAppearance = false }
+    val darkGlass = LocalGlass.current.dark
     LazyColumn(
         Modifier.fillMaxSize().statusBarsPadding(),
         contentPadding = PaddingValues(16.dp),
@@ -187,7 +193,11 @@ private fun HomeScreen(vm: BrowseViewModel, cleanable: Long?, onClean: () -> Uni
                     contentAlignment = Alignment.Center
                 ) { Icon(Icons.Filled.Folder, null, tint = MaterialTheme.colorScheme.onPrimary, modifier = Modifier.size(22.dp)) }
                 Spacer(Modifier.width(12.dp))
-                Text("Archivos", style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Bold)
+                Text(
+                    "Archivos", style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Bold,
+                    modifier = Modifier.weight(1f)
+                )
+                IconButton(onClick = { showAppearance = true }) { Icon(Icons.Filled.Palette, "Apariencia") }
             }
         }
         item {
@@ -295,9 +305,14 @@ private fun HomeScreen(vm: BrowseViewModel, cleanable: Long?, onClean: () -> Uni
                                 val color = Color(c.color)
                                 Box(
                                     Modifier.size(52.dp).clip(RoundedCornerShape(17.dp))
-                                        .background(color.copy(alpha = 0.18f)),
+                                        .background(color.copy(alpha = if (darkGlass) 0.30f else 0.18f)),
                                     contentAlignment = Alignment.Center
-                                ) { Icon(browseIcon(c), null, tint = color) }
+                                ) {
+                                    Icon(
+                                        browseIcon(c), null,
+                                        tint = if (darkGlass) androidx.compose.ui.graphics.lerp(color, Color.White, 0.35f) else color
+                                    )
+                                }
                                 Spacer(Modifier.height(6.dp))
                                 Text(c.label, style = MaterialTheme.typography.labelLarge, maxLines = 1)
                                 Text(
@@ -586,6 +601,55 @@ private fun ListScreen(vm: BrowseViewModel, snackbar: SnackbarHostState) {
             dismissButton = { TextButton(onClick = { confirmDelete = false }) { Text("Cancelar") } }
         )
     }
+}
+
+/** Apariencia: intensidad del vidrio y fondo. */
+@Composable
+private fun AppearanceDialog(onDismiss: () -> Unit) {
+    val ctx = LocalContext.current
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        icon = { Icon(Icons.Filled.Palette, null) },
+        title = { Text("Apariencia") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                Text("Intensidad del vidrio", style = MaterialTheme.typography.titleSmall)
+                Appearance.levels.forEachIndexed { i, label ->
+                    Row(
+                        Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp))
+                            .clickable { Appearance.level = i; Appearance.save(ctx) },
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        RadioButton(selected = Appearance.level == i, onClick = { Appearance.level = i; Appearance.save(ctx) })
+                        Column {
+                            Text(label)
+                            Text(
+                                listOf("Más transparente", "Equilibrado (recomendado)", "Casi opaco, máxima legibilidad")[i],
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                    }
+                }
+                HorizontalDivider(Modifier.padding(vertical = 6.dp))
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Column(Modifier.weight(1f)) {
+                        Text("Usar mi fondo de pantalla")
+                        Text(
+                            "Si lo apagas, se usan colores suaves",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                    Switch(
+                        checked = Appearance.useWallpaper,
+                        onCheckedChange = { Appearance.useWallpaper = it; Appearance.save(ctx) }
+                    )
+                }
+            }
+        },
+        confirmButton = { TextButton(onClick = onDismiss) { Text("Listo") } }
+    )
 }
 
 /** Filtros de búsqueda: tipo, fecha y tamaño. */

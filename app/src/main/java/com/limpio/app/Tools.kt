@@ -6,6 +6,7 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -36,6 +37,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -105,19 +107,33 @@ private fun ToolsHome(onOpen: (Tool) -> Unit) {
                     .fillMaxWidth()
                     .glass()
                     .clickable(enabled = t.ready) { onOpen(t) }
-                    .padding(16.dp)
-                    .alpha(if (t.ready) 1f else 0.6f),
+                    .padding(16.dp),
                 verticalArrangement = Arrangement.spacedBy(12.dp)
             ) {
-                Box(
-                    Modifier.size(46.dp).clip(RoundedCornerShape(15.dp)).background(color.copy(alpha = 0.16f)),
-                    contentAlignment = Alignment.Center
-                ) { Icon(t.icon, null, tint = color) }
+                val dark = LocalGlass.current.dark
+                Row(verticalAlignment = Alignment.Top) {
+                    Box(
+                        Modifier.size(46.dp).clip(RoundedCornerShape(15.dp))
+                            .background(color.copy(alpha = if (dark) 0.30f else 0.16f)),
+                        contentAlignment = Alignment.Center
+                    ) { Icon(t.icon, null, tint = if (dark) lerp(color, Color.White, 0.35f) else color) }
+                    Spacer(Modifier.weight(1f))
+                    if (!t.ready) {
+                        Text(
+                            "Próximamente",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSecondaryContainer,
+                            modifier = Modifier.clip(RoundedCornerShape(8.dp))
+                                .background(MaterialTheme.colorScheme.secondaryContainer)
+                                .padding(horizontal = 8.dp, vertical = 3.dp)
+                        )
+                    }
+                }
                 Column {
                     Text(t.title, fontWeight = FontWeight.SemiBold)
                     Spacer(Modifier.height(2.dp))
                     Text(
-                        if (t.ready) t.subtitle else "Próximamente",
+                        t.subtitle,
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )

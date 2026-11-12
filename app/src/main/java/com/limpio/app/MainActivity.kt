@@ -71,6 +71,7 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
+        Appearance.load(this)
         setContent {
             setSingletonImageLoaderFactory { ctx ->
                 ImageLoader.Builder(ctx)
