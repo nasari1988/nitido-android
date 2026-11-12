@@ -35,16 +35,16 @@ jobs:
           chmod +x gradlew
           ./gradlew testDebugUnitTest assembleRelease --stacktrace
       - name: Renombrar
-        run: cp app/build/outputs/apk/release/app-release.apk Limpio.apk
+        run: cp app/build/outputs/apk/release/app-release.apk Archivos.apk
       - uses: actions/upload-artifact@v4
         with:
-          name: Limpio-apk
-          path: Limpio.apk
+          name: Archivos-apk
+          path: Archivos.apk
       - name: Publicar en Releases
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh release create "limpio-v${{ github.run_number }}" Limpio.apk \
+          gh release create "archivos-v${{ github.run_number }}" Archivos.apk \
             --target "$GITHUB_SHA" \
-            --title "Limpio v${{ github.run_number }}" \
-            --notes "APK de Limpio compilado desde la rama limpio." --prerelease
+            --title "Archivos v${{ github.run_number }}" \
+            --notes "APK de Archivos (antes Limpio) compilado desde la rama limpio." --prerelease

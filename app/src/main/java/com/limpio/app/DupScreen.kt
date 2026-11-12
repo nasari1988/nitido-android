@@ -225,23 +225,24 @@ class DupViewModel(app: Application) : AndroidViewModel(app) {
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun DupTab(vm: DupViewModel) {
+fun DupTab(vm: DupViewModel, onExit: () -> Unit = {}) {
     val ctx = LocalContext.current
     val snackbar = remember { SnackbarHostState() }
     LaunchedEffect(vm.message) { vm.message?.let { snackbar.showSnackbar(it); vm.message = null } }
     LaunchedEffect(StorageChanges.version) { vm.pruneMissing() }
     val results = vm.results
-    BackHandler(enabled = results != null && vm.progress == null) { vm.newSearch() }
+    BackHandler(enabled = vm.progress == null) { if (results != null) vm.newSearch() else onExit() }
 
     Scaffold(
+        containerColor = androidx.compose.ui.graphics.Color.Transparent,
         contentWindowInsets = WindowInsets(0, 0, 0, 0),
         topBar = {
             TopAppBar(
                 title = { Text("Duplicados") },
                 navigationIcon = {
-                    if (results != null && vm.progress == null) {
-                        IconButton(onClick = { vm.newSearch() }) {
-                            Icon(Icons.AutoMirrored.Filled.ArrowBack, "Cambiar búsqueda")
+                    if (vm.progress == null) {
+                        IconButton(onClick = { if (results != null) vm.newSearch() else onExit() }) {
+                            Icon(Icons.AutoMirrored.Filled.ArrowBack, "Atrás")
                         }
                     }
                 },

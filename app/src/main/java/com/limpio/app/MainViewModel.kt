@@ -98,7 +98,21 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
             scannedAt = System.currentTimeMillis()
             scannedVersion = version
             phase = Phase.Ready
+            pendingOpen?.let { openCategory = it; pendingOpen = null }
             refreshStorage()
+        }
+    }
+
+    private var pendingOpen: Category? = null
+
+    /** Abre una categoría; si aún no hay análisis, lo inicia y la abre al terminar. */
+    fun openWhenReady(cat: Category) {
+        showQuick = false
+        if (result != null && phase !is Phase.Scanning) {
+            openCategory = cat
+        } else {
+            pendingOpen = cat
+            if (phase !is Phase.Scanning) scan()
         }
     }
 

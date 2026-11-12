@@ -172,13 +172,13 @@ class OrganizerViewModel(app: Application) : AndroidViewModel(app) {
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun OrganizerTab(vm: OrganizerViewModel) {
+fun OrganizerTab(vm: OrganizerViewModel, onExit: () -> Unit = {}) {
     val ctx = LocalContext.current
     val snackbar = remember { SnackbarHostState() }
     LaunchedEffect(vm.message) { vm.message?.let { snackbar.showSnackbar(it); vm.message = null } }
     LaunchedEffect(StorageChanges.version) { if (vm.groups == null || vm.open == null) vm.scan() }
     val open = vm.open
-    BackHandler(enabled = open != null) { vm.open = null }
+    BackHandler { if (vm.open != null) vm.open = null else onExit() }
 
     Scaffold(
         contentWindowInsets = WindowInsets(0, 0, 0, 0),
@@ -186,7 +186,7 @@ fun OrganizerTab(vm: OrganizerViewModel) {
             TopAppBar(
                 title = { Text(open?.let { "${it.title} → ${it.target}" } ?: "Organizar") },
                 navigationIcon = {
-                    if (open != null) IconButton(onClick = { vm.open = null }) {
+                    IconButton(onClick = { if (vm.open != null) vm.open = null else onExit() }) {
                         Icon(Icons.AutoMirrored.Filled.ArrowBack, "Volver")
                     }
                 },

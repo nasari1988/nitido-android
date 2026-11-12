@@ -15,6 +15,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
@@ -38,6 +39,7 @@ import androidx.compose.material.icons.automirrored.filled.OpenInNew
 import androidx.compose.material.icons.automirrored.filled.Sort
 import androidx.compose.material.icons.filled.Android
 import androidx.compose.material.icons.filled.Archive
+import androidx.compose.material.icons.filled.ArrowDropDown
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.CleaningServices
 import androidx.compose.material.icons.filled.Close
@@ -49,6 +51,7 @@ import androidx.compose.material.icons.filled.Description
 import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.FolderZip
+import androidx.compose.material.icons.filled.Folder
 import androidx.compose.material.icons.filled.GridView
 import androidx.compose.material.icons.filled.Headphones
 import androidx.compose.material.icons.filled.History
@@ -75,6 +78,7 @@ import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.FilterChip
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
@@ -112,6 +116,9 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.ui.text.input.ImeAction
 import java.io.File
 
 fun browseIcon(c: BrowseCategory): ImageVector = when (c) {
@@ -126,7 +133,7 @@ fun browseIcon(c: BrowseCategory): ImageVector = when (c) {
 }
 
 @Composable
-fun BrowseTab(vm: BrowseViewModel, onClean: () -> Unit) {
+fun BrowseTab(vm: BrowseViewModel, cleanable: Long? = null, onClean: () -> Unit) {
     val snackbar = remember { SnackbarHostState() }
     LaunchedEffect(vm.message) { vm.message?.let { snackbar.showSnackbar(it); vm.message = null } }
     LaunchedEffect(Unit) { vm.load() }
@@ -134,7 +141,7 @@ fun BrowseTab(vm: BrowseViewModel, onClean: () -> Unit) {
         if (vm.selection.isNotEmpty()) vm.clearSelection() else vm.back()
     }
     Box(Modifier.fillMaxSize()) {
-        if (vm.screen == Screen.Home) HomeScreen(vm, onClean) else ListScreen(vm, snackbar)
+        if (vm.screen == Screen.Home) HomeScreen(vm, cleanable, onClean) else ListScreen(vm, snackbar)
         if (vm.screen == Screen.Home) {
             SnackbarHost(snackbar, Modifier.align(Alignment.BottomCenter))
         }
@@ -166,7 +173,7 @@ fun BrowseTab(vm: BrowseViewModel, onClean: () -> Unit) {
 // =====================================================================
 
 @Composable
-private fun HomeScreen(vm: BrowseViewModel, onClean: () -> Unit) {
+private fun HomeScreen(vm: BrowseViewModel, cleanable: Long?, onClean: () -> Unit) {
     val ctx = LocalContext.current
     LazyColumn(
         Modifier.fillMaxSize().statusBarsPadding(),
@@ -174,27 +181,108 @@ private fun HomeScreen(vm: BrowseViewModel, onClean: () -> Unit) {
         verticalArrangement = Arrangement.spacedBy(14.dp)
     ) {
         item {
-            Text("Archivos", style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Bold)
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Box(
+                    Modifier.size(38.dp).clip(RoundedCornerShape(12.dp)).background(MaterialTheme.colorScheme.primary),
+                    contentAlignment = Alignment.Center
+                ) { Icon(Icons.Filled.Folder, null, tint = MaterialTheme.colorScheme.onPrimary, modifier = Modifier.size(22.dp)) }
+                Spacer(Modifier.width(12.dp))
+                Text("Archivos", style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Bold)
+            }
         }
         item {
-            Surface(
-                onClick = { vm.navigate(Screen.Search) },
-                shape = RoundedCornerShape(28.dp),
-                color = MaterialTheme.colorScheme.surfaceContainerHigh,
-                modifier = Modifier.fillMaxWidth().height(52.dp)
+            Row(
+                Modifier.fillMaxWidth().height(52.dp).glass(RoundedCornerShape(26.dp))
+                    .clickable { vm.navigate(Screen.Search) }.padding(horizontal = 18.dp),
+                verticalAlignment = Alignment.CenterVertically
             ) {
-                Row(Modifier.padding(horizontal = 18.dp), verticalAlignment = Alignment.CenterVertically) {
-                    Icon(Icons.Filled.Search, null, tint = MaterialTheme.colorScheme.onSurfaceVariant)
-                    Spacer(Modifier.width(12.dp))
-                    Text("Buscar en tu teléfono", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Icon(Icons.Filled.Search, null, tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                Spacer(Modifier.width(12.dp))
+                Text("Buscar archivos y carpetas", color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+        }
+
+        // Almacenamiento: barra repartida por tipo de archivo
+        items(vm.volumes, key = { it.path }) { v ->
+            val used = v.total - v.free
+            Column(
+                Modifier.fillMaxWidth().glass().clickable { vm.openFolder(v.path) }.padding(16.dp),
+                verticalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(
+                        if (v.primary) Icons.Filled.PhoneAndroid else Icons.Filled.SdCard, null,
+                        tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(20.dp)
+                    )
+                    Spacer(Modifier.width(8.dp))
+                    Text(v.label, fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f))
+                    Text(
+                        "${formatSize(ctx, used)} de ${formatSize(ctx, v.total)}",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
                 }
+                val parts = if (v.primary && vm.catStats.isNotEmpty()) {
+                    listOf(BrowseCategory.VIDEOS, BrowseCategory.IMAGES, BrowseCategory.APPS, BrowseCategory.AUDIO, BrowseCategory.DOCUMENTS)
+                        .map { c -> Triple(c.label, Color(c.color), vm.catStats[c]?.second ?: 0L) }
+                        .let { l -> l + Triple("Otros", Color(0xFF8A929C), (used - l.sumOf { it.third }).coerceAtLeast(0)) }
+                } else listOf(Triple("Usado", MaterialTheme.colorScheme.primary, used))
+                Row(
+                    Modifier.fillMaxWidth().height(10.dp).clip(RoundedCornerShape(5.dp))
+                        .background(MaterialTheme.colorScheme.onSurface.copy(alpha = 0.08f))
+                ) {
+                    val total = v.total.coerceAtLeast(1)
+                    parts.forEach { (_, color, size) ->
+                        val f = size.toFloat() / total
+                        if (f > 0.002f) {
+                            Box(Modifier.weight(f).fillMaxHeight().background(color))
+                            Spacer(Modifier.width(2.dp))
+                        }
+                    }
+                    val free = v.free.toFloat() / total
+                    if (free > 0.002f) Spacer(Modifier.weight(free))
+                }
+                if (parts.size > 1) {
+                    Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                        parts.forEach { (label, color, size) ->
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Box(Modifier.size(8.dp).clip(CircleShape).background(color))
+                                Spacer(Modifier.width(5.dp))
+                                Text(
+                                    "$label ${formatSize(ctx, size)}",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        item {
+            Row(
+                Modifier.fillMaxWidth().clip(RoundedCornerShape(18.dp))
+                    .background(MaterialTheme.colorScheme.primaryContainer)
+                    .clickable(onClick = onClean).padding(horizontal = 16.dp, vertical = 14.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Icon(Icons.Filled.CleaningServices, null, tint = MaterialTheme.colorScheme.onPrimaryContainer)
+                Spacer(Modifier.width(12.dp))
+                Text(
+                    if (cleanable != null && cleanable > 0) "Puedes liberar ${formatSize(ctx, cleanable)} de basura"
+                    else "Liberar espacio: basura, restos de apps y más",
+                    color = MaterialTheme.colorScheme.onPrimaryContainer,
+                    fontWeight = FontWeight.SemiBold,
+                    modifier = Modifier.weight(1f)
+                )
+                Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight, null, tint = MaterialTheme.colorScheme.onPrimaryContainer)
             }
         }
 
         // Categorías
         item {
             val cats = BrowseCategory.entries
-            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            Column(Modifier.glass().padding(vertical = 6.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                 cats.chunked(4).forEach { row ->
                     Row(Modifier.fillMaxWidth()) {
                         row.forEach { c ->
@@ -206,8 +294,8 @@ private fun HomeScreen(vm: BrowseViewModel, onClean: () -> Unit) {
                             ) {
                                 val color = Color(c.color)
                                 Box(
-                                    Modifier.size(54.dp).clip(RoundedCornerShape(18.dp))
-                                        .background(color.copy(alpha = 0.16f)),
+                                    Modifier.size(52.dp).clip(RoundedCornerShape(17.dp))
+                                        .background(color.copy(alpha = 0.18f)),
                                     contentAlignment = Alignment.Center
                                 ) { Icon(browseIcon(c), null, tint = color) }
                                 Spacer(Modifier.height(6.dp))
@@ -238,61 +326,17 @@ private fun HomeScreen(vm: BrowseViewModel, onClean: () -> Unit) {
                 LazyRow(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                     items(vm.recent, key = { it.path }) { e ->
                         Column(
-                            Modifier.width(104.dp).clip(RoundedCornerShape(12.dp)).clickable {
+                            Modifier.width(96.dp).clip(RoundedCornerShape(12.dp)).clickable {
                                 if (e.isViewable) vm.openViewer(vm.recent, e) else FileOps.open(ctx, e.path)
                             }
                         ) {
-                            FileThumb(e.path, false, modifier = Modifier.size(104.dp))
+                            FileThumb(e.path, false, modifier = Modifier.size(96.dp))
                             Text(
                                 e.name, style = MaterialTheme.typography.labelSmall, maxLines = 1,
                                 overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(top = 4.dp)
                             )
                         }
                     }
-                }
-            }
-        }
-
-        // Almacenamiento
-        item { Text("Almacenamiento", style = MaterialTheme.typography.titleMedium) }
-        items(vm.volumes, key = { it.path }) { v ->
-            Card(Modifier.fillMaxWidth().clickable { vm.openFolder(v.path) }) {
-                Row(Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
-                    Icon(
-                        if (v.primary) Icons.Filled.PhoneAndroid else Icons.Filled.SdCard, null,
-                        tint = MaterialTheme.colorScheme.primary
-                    )
-                    Spacer(Modifier.width(14.dp))
-                    Column(Modifier.weight(1f)) {
-                        Text(v.label, fontWeight = FontWeight.SemiBold)
-                        Spacer(Modifier.height(6.dp))
-                        LinearProgressIndicator(
-                            progress = { if (v.total > 0) (v.total - v.free).toFloat() / v.total else 0f },
-                            modifier = Modifier.fillMaxWidth().height(6.dp)
-                        )
-                        Spacer(Modifier.height(4.dp))
-                        Text(
-                            "${formatSize(ctx, v.free)} libres de ${formatSize(ctx, v.total)}",
-                            style = MaterialTheme.typography.bodySmall
-                        )
-                    }
-                    Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight, null)
-                }
-            }
-        }
-        item {
-            Card(
-                Modifier.fillMaxWidth().clickable(onClick = onClean),
-                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer)
-            ) {
-                Row(Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
-                    Icon(Icons.Filled.CleaningServices, null)
-                    Spacer(Modifier.width(14.dp))
-                    Column(Modifier.weight(1f)) {
-                        Text("Liberar espacio", fontWeight = FontWeight.SemiBold)
-                        Text("Basura, restos de apps y duplicados", style = MaterialTheme.typography.bodySmall)
-                    }
-                    Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight, null)
                 }
             }
         }
@@ -403,6 +447,8 @@ private fun ListScreen(vm: BrowseViewModel, snackbar: SnackbarHostState) {
                                 onValueChange = { vm.setSearch(it) },
                                 placeholder = { Text("Nombre del archivo o carpeta") },
                                 singleLine = true,
+                                keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
+                                keyboardActions = KeyboardActions(onSearch = { vm.rememberSearch() }),
                                 colors = TextFieldDefaults.colors(
                                     focusedContainerColor = Color.Transparent,
                                     unfocusedContainerColor = Color.Transparent,
@@ -481,14 +527,18 @@ private fun ListScreen(vm: BrowseViewModel, snackbar: SnackbarHostState) {
     ) { pad ->
         Column(Modifier.fillMaxSize().padding(pad)) {
             if (s is Screen.Folder) Breadcrumbs(vm, s.path)
+            if (s == Screen.Search) SearchFilters(vm)
             if (vm.sizing) LinearProgressIndicator(Modifier.fillMaxWidth())
             Box(Modifier.fillMaxSize()) {
                 when {
                     vm.loading && vm.entries.isEmpty() ->
                         CircularProgressIndicator(Modifier.align(Alignment.Center))
+                    s == Screen.Search && vm.entries.isEmpty() && vm.query.trim().length < 2 && !vm.hasSearchFilters ->
+                        RecentSearches(vm)
                     vm.entries.isEmpty() -> Text(
                         when {
-                            s == Screen.Search && vm.query.trim().length < 2 -> "Escribe al menos 2 letras"
+                            s == Screen.Search && vm.query.trim().length < 2 && !vm.hasSearchFilters -> "Escribe al menos 2 letras"
+                            s == Screen.Search && vm.query.isBlank() -> "Nada coincide con los filtros"
                             s == Screen.Search -> "Sin resultados para \"${vm.query}\""
                             else -> "Aquí no hay nada"
                         },
@@ -535,6 +585,77 @@ private fun ListScreen(vm: BrowseViewModel, snackbar: SnackbarHostState) {
             },
             dismissButton = { TextButton(onClick = { confirmDelete = false }) { Text("Cancelar") } }
         )
+    }
+}
+
+/** Filtros de búsqueda: tipo, fecha y tamaño. */
+@Composable
+private fun SearchFilters(vm: BrowseViewModel) {
+    Row(
+        Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(horizontal = 12.dp, vertical = 4.dp),
+        horizontalArrangement = Arrangement.spacedBy(8.dp)
+    ) {
+        FilterMenu(
+            label = vm.searchKind?.label ?: "Tipo",
+            active = vm.searchKind != null,
+            options = listOf("Todos los tipos") + SEARCH_KINDS.map { it.first.label },
+        ) { i -> vm.setSearchFilters(kind = if (i == 0) null else SEARCH_KINDS[i - 1].first) }
+        FilterMenu(
+            label = if (vm.searchDate == DateFilter.ANY) "Fecha" else vm.searchDate.label,
+            active = vm.searchDate != DateFilter.ANY,
+            options = DateFilter.entries.map { it.label },
+        ) { i -> vm.setSearchFilters(date = DateFilter.entries[i]) }
+        FilterMenu(
+            label = if (vm.searchSize == SizeFilter.ANY) "Tamaño" else vm.searchSize.label,
+            active = vm.searchSize != SizeFilter.ANY,
+            options = SizeFilter.entries.map { it.label },
+        ) { i -> vm.setSearchFilters(size = SizeFilter.entries[i]) }
+    }
+}
+
+@Composable
+private fun FilterMenu(label: String, active: Boolean, options: List<String>, onPick: (Int) -> Unit) {
+    var open by remember { mutableStateOf(false) }
+    Box {
+        FilterChip(
+            selected = active,
+            onClick = { open = true },
+            label = { Text(label) },
+            trailingIcon = { Icon(Icons.Filled.ArrowDropDown, null) }
+        )
+        DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
+            options.forEachIndexed { i, o ->
+                DropdownMenuItem(text = { Text(o) }, onClick = { open = false; onPick(i) })
+            }
+        }
+    }
+}
+
+@Composable
+private fun RecentSearches(vm: BrowseViewModel) {
+    Column(Modifier.fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        if (vm.recentSearches.isEmpty()) {
+            Text(
+                "Busca por nombre o usa los filtros de arriba (por ejemplo, Videos de más de 100 MB).",
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+        } else {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text("Búsquedas recientes", style = MaterialTheme.typography.titleSmall, modifier = Modifier.weight(1f))
+                TextButton(onClick = { vm.clearRecentSearches() }) { Text("Borrar") }
+            }
+            vm.recentSearches.forEach { q ->
+                Row(
+                    Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp)).clickable { vm.setSearch(q) }
+                        .padding(vertical = 10.dp, horizontal = 4.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Icon(Icons.Filled.History, null, tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Spacer(Modifier.width(12.dp))
+                    Text(q)
+                }
+            }
+        }
     }
 }
 

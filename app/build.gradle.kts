@@ -12,8 +12,8 @@ android {
         applicationId = "com.limpio.app"
         minSdk = 26
         targetSdk = 35
-        versionCode = 7
-        versionName = "5.0"
+        versionCode = 8
+        versionName = "6.0"
     }
 
     // En GitHub Actions se usa una llave fija (guardada en la caché privada del repo),

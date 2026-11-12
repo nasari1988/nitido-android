@@ -51,6 +51,24 @@ enum class BrowseCategory(val label: String, val color: Long) {
     RECENT("Recientes", 0xFF546E7A),
 }
 
+enum class DateFilter(val label: String, val days: Int) {
+    ANY("Cualquier fecha", 0), DAY("Hoy", 1), WEEK("Últimos 7 días", 7), MONTH("Últimos 30 días", 30), YEAR("Último año", 365)
+}
+
+enum class SizeFilter(val label: String, val min: Long) {
+    ANY("Cualquier tamaño", 0), MB10("Más de 10 MB", 10L shl 20), MB100("Más de 100 MB", 100L shl 20), GB1("Más de 1 GB", 1L shl 30)
+}
+
+/** Tipos que se pueden elegir en el filtro de búsqueda. */
+val SEARCH_KINDS = listOf(
+    BrowseCategory.IMAGES to FileKind.IMAGE,
+    BrowseCategory.VIDEOS to FileKind.VIDEO,
+    BrowseCategory.AUDIO to FileKind.AUDIO,
+    BrowseCategory.DOCUMENTS to FileKind.DOCUMENT,
+    BrowseCategory.APPS to FileKind.APK,
+    BrowseCategory.ARCHIVES to FileKind.ARCHIVE,
+)
+
 sealed interface Screen {
     data object Home : Screen
     data class Folder(val path: String) : Screen
@@ -179,6 +197,42 @@ class BrowseViewModel(app: Application) : AndroidViewModel(app) {
 
     var query by mutableStateOf("")
         private set
+    var searchKind by mutableStateOf<BrowseCategory?>(null)
+        private set
+    var searchDate by mutableStateOf(DateFilter.ANY)
+        private set
+    var searchSize by mutableStateOf(SizeFilter.ANY)
+        private set
+    var recentSearches by mutableStateOf(
+        prefs.getString("recentSearches", "")!!.split('\n').filter { it.isNotBlank() }
+    )
+        private set
+
+    val hasSearchFilters: Boolean
+        get() = searchKind != null || searchDate != DateFilter.ANY || searchSize != SizeFilter.ANY
+
+    fun setSearchFilters(
+        kind: BrowseCategory? = searchKind,
+        date: DateFilter = searchDate,
+        size: SizeFilter = searchSize,
+    ) {
+        searchKind = kind
+        searchDate = date
+        searchSize = size
+        load()
+    }
+
+    fun rememberSearch() {
+        val q = query.trim()
+        if (q.length < 2) return
+        recentSearches = (listOf(q) + recentSearches.filterNot { it.equals(q, ignoreCase = true) }).take(8)
+        prefs.edit().putString("recentSearches", recentSearches.joinToString("\n")).apply()
+    }
+
+    fun clearRecentSearches() {
+        recentSearches = emptyList()
+        prefs.edit().remove("recentSearches").apply()
+    }
     var folderSizes by mutableStateOf<Map<String, Long>>(emptyMap())
         private set
     var sizing by mutableStateOf(false)
@@ -281,7 +335,7 @@ class BrowseViewModel(app: Application) : AndroidViewModel(app) {
                 when (s) {
                     is Screen.Folder -> File(s.path).listFiles().orEmpty().mapNotNull { entryOf(it) }
                     is Screen.Cat -> MediaQueries.category(ctx, s.cat)
-                    Screen.Search -> if (query.trim().length < 2) emptyList() else MediaQueries.search(ctx, query.trim())
+                    Screen.Search -> searchResults()
                     Screen.Home -> emptyList()
                 }.filter { showHidden || !it.hidden }
             }
@@ -289,6 +343,23 @@ class BrowseViewModel(app: Application) : AndroidViewModel(app) {
                 entries = if (s is Screen.Cat && s.cat == BrowseCategory.RECENT) list else sorted(list)
                 loading = false
             }
+        }
+    }
+
+    private fun searchResults(): List<Entry> {
+        val q = query.trim()
+        if (q.length < 2 && !hasSearchFilters) return emptyList()
+        val base = when {
+            q.length >= 2 -> MediaQueries.search(ctx, q)
+            searchKind != null -> MediaQueries.category(ctx, searchKind!!)
+            else -> MediaQueries.search(ctx, "")
+        }
+        val kind = SEARCH_KINDS.firstOrNull { it.first == searchKind }?.second
+        val since = if (searchDate.days > 0) System.currentTimeMillis() - searchDate.days * 86_400_000L else 0L
+        return base.filter { e ->
+            (kind == null || e.kind == kind) &&
+                (since == 0L || e.modified >= since) &&
+                (searchSize.min == 0L || (!e.isDir && e.size >= searchSize.min))
         }
     }
 
@@ -350,6 +421,7 @@ class BrowseViewModel(app: Application) : AndroidViewModel(app) {
     // ---------- Abrir ----------
 
     fun openEntry(e: Entry) {
+        if (screen == Screen.Search) rememberSearch()
         when {
             e.isDir -> openFolder(e.path)
             e.isViewable -> {

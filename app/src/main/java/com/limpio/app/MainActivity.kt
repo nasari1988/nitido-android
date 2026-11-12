@@ -30,6 +30,7 @@ import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.CleaningServices
 import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.Folder
+import androidx.compose.material.icons.filled.Handyman
 import androidx.compose.material3.Button
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -77,9 +78,12 @@ class MainActivity : ComponentActivity() {
                     .crossfade(true)
                     .build()
             }
-            LimpioTheme {
-                if (hasPermission) LimpioApp(browse, cleaner, dups, organizer)
-                else PermissionScreen()
+            ArchivosTheme {
+                Box(Modifier.fillMaxSize()) {
+                    GlassBackground()
+                    if (hasPermission) ArchivosApp(browse, cleaner, dups, organizer)
+                    else PermissionScreen()
+                }
             }
         }
     }
@@ -132,20 +136,20 @@ class MainActivity : ComponentActivity() {
         }
         Scaffold { pad ->
             Column(
-                Modifier.fillMaxSize().padding(pad).padding(28.dp),
+                Modifier.fillMaxSize().padding(pad).padding(28.dp).glass().padding(24.dp),
                 verticalArrangement = Arrangement.Center,
                 horizontalAlignment = Alignment.CenterHorizontally
             ) {
                 Icon(
-                    Icons.Filled.CleaningServices, null,
+                    Icons.Filled.Folder, null,
                     Modifier.size(72.dp), tint = MaterialTheme.colorScheme.primary
                 )
                 Spacer(Modifier.height(20.dp))
-                Text("Limpio", style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Bold)
+                Text("Archivos", style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Bold)
                 Spacer(Modifier.height(12.dp))
                 Text(
-                    "Para limpiar, organizar y explorar tus archivos, Limpio necesita acceso a " +
-                        "todos los archivos. Todo ocurre en tu teléfono: la app no tiene acceso a internet.",
+                    "Para explorar, limpiar y organizar tus archivos, Archivos necesita acceso a " +
+                        "todos los archivos. Todo se procesa en tu teléfono.",
                     style = MaterialTheme.typography.bodyLarge
                 )
                 Spacer(Modifier.height(24.dp))
@@ -158,60 +162,51 @@ class MainActivity : ComponentActivity() {
 }
 
 @Composable
-fun LimpioTheme(content: @Composable () -> Unit) {
-    val dark = isSystemInDarkTheme()
-    val ctx = LocalContext.current
-    val scheme = when {
-        Build.VERSION.SDK_INT >= Build.VERSION_CODES.S ->
-            if (dark) dynamicDarkColorScheme(ctx) else dynamicLightColorScheme(ctx)
-        dark -> darkColorScheme(primary = Color(0xFF5FD4B0))
-        else -> lightColorScheme(primary = Color(0xFF0F8A6B))
-    }
-    MaterialTheme(colorScheme = scheme, content = content)
-}
-
-@Composable
-fun LimpioApp(
+fun ArchivosApp(
     browse: BrowseViewModel,
     cleaner: MainViewModel,
     dups: DupViewModel,
     organizer: OrganizerViewModel,
 ) {
     var tab by rememberSaveable { mutableIntStateOf(0) }
+    var tool by rememberSaveable { mutableStateOf<String?>(null) }
+    val nav = listOf(
+        NavItem(Icons.Filled.Folder, "Explorar"),
+        NavItem(Icons.Filled.CleaningServices, "Limpiar"),
+        NavItem(Icons.Filled.Handyman, "Herramientas"),
+    )
     Box(Modifier.fillMaxSize()) {
         Scaffold(
+            containerColor = Color.Transparent,
             contentWindowInsets = WindowInsets(0, 0, 0, 0),
             bottomBar = {
-                NavigationBar {
-                    NavigationBarItem(
-                        selected = tab == 0, onClick = { if (tab == 0) browse.goHome() else tab = 0 },
-                        icon = { Icon(Icons.Filled.Folder, null) },
-                        label = { Text("Inicio") }
-                    )
-                    NavigationBarItem(
-                        selected = tab == 1, onClick = { tab = 1 },
-                        icon = { Icon(Icons.Filled.CleaningServices, null) },
-                        label = { Text("Limpiar") }
-                    )
-                    NavigationBarItem(
-                        selected = tab == 2, onClick = { tab = 2 },
-                        icon = { Icon(Icons.Filled.ContentCopy, null) },
-                        label = { Text("Duplicados") }
-                    )
-                    NavigationBarItem(
-                        selected = tab == 3, onClick = { tab = 3 },
-                        icon = { Icon(Icons.Filled.AutoAwesome, null) },
-                        label = { Text("Organizar") }
-                    )
+                GlassNavBar(nav, tab) { i ->
+                    when {
+                        i == tab && i == 0 -> browse.goHome()
+                        i == tab && i == 2 -> tool = null
+                        else -> tab = i
+                    }
                 }
             }
         ) { pad ->
             Box(Modifier.fillMaxSize().padding(bottom = pad.calculateBottomPadding())) {
                 when (tab) {
-                    0 -> BrowseTab(browse, onClean = { tab = 1 })
+                    0 -> BrowseTab(
+                        browse,
+                        cleanable = cleaner.result?.let { cleaner.quickCleanItems().sumOf { it.size } },
+                        onClean = { tab = 1 },
+                    )
                     1 -> CleanerTab(cleaner)
-                    2 -> DupTab(dups)
-                    else -> OrganizerTab(organizer)
+                    else -> ToolsTab(
+                        tool = tool,
+                        onTool = { tool = it },
+                        dups = dups,
+                        organizer = organizer,
+                        onLargeFiles = {
+                            cleaner.openWhenReady(Category.LARGE)
+                            tab = 1
+                        },
+                    )
                 }
             }
         }
