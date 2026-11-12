@@ -16,6 +16,20 @@ android {
         versionName = "3.0"
     }
 
+    // En GitHub Actions se usa una llave fija (guardada en la caché privada del repo),
+    // así cada actualización se instala encima de la anterior.
+    val ciKeystore = System.getenv("LIMPIO_KEYSTORE")
+    signingConfigs {
+        if (ciKeystore != null) {
+            create("limpio") {
+                storeFile = file(ciKeystore)
+                storePassword = "limpio-ci"
+                keyAlias = "limpio"
+                keyPassword = "limpio-ci"
+            }
+        }
+    }
+
     buildTypes {
         release {
             isMinifyEnabled = true
@@ -24,8 +38,7 @@ android {
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"
             )
-            // Firmado con la llave de depuración para poder instalarlo directamente.
-            signingConfig = signingConfigs.getByName("debug")
+            signingConfig = signingConfigs.getByName(if (ciKeystore != null) "limpio" else "debug")
         }
     }
 

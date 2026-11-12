@@ -21,10 +21,17 @@ jobs:
       # actualizaciones se instalen encima sin desinstalar.
       - uses: actions/cache@v4
         with:
-          path: ~/.android/debug.keystore
-          key: limpio-debug-keystore-v1
+          path: ~/limpio-keystore/limpio.jks
+          key: limpio-keystore-v1
       - name: Pruebas y compilación
         run: |
+          if [ ! -f ~/limpio-keystore/limpio.jks ]; then
+            mkdir -p ~/limpio-keystore
+            keytool -genkeypair -keystore ~/limpio-keystore/limpio.jks -alias limpio \
+              -storepass limpio-ci -keypass limpio-ci -keyalg RSA -keysize 2048 \
+              -validity 10000 -dname "CN=Limpio"
+          fi
+          export LIMPIO_KEYSTORE=$HOME/limpio-keystore/limpio.jks
           chmod +x gradlew
           ./gradlew testDebugUnitTest assembleRelease --stacktrace
       - name: Renombrar
