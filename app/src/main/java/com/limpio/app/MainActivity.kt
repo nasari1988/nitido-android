@@ -28,6 +28,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.CleaningServices
+import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.Folder
 import androidx.compose.material3.Button
 import androidx.compose.material3.Icon
@@ -63,6 +64,7 @@ class MainActivity : ComponentActivity() {
     private val cleaner: MainViewModel by viewModels()
     private val organizer: OrganizerViewModel by viewModels()
     private val explorer: ExplorerViewModel by viewModels()
+    private val dups: DupViewModel by viewModels()
     private var hasPermission by mutableStateOf(false)
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -76,7 +78,7 @@ class MainActivity : ComponentActivity() {
                     .build()
             }
             LimpioTheme {
-                if (hasPermission) LimpioApp(cleaner, organizer, explorer)
+                if (hasPermission) LimpioApp(cleaner, dups, organizer, explorer)
                 else PermissionScreen()
             }
         }
@@ -93,6 +95,7 @@ class MainActivity : ComponentActivity() {
         ) cleaner.scan()
         if (organizer.groups != null && organizer.open == null) organizer.scan()
         explorer.load()
+        dups.pruneMissing()
     }
 
     private fun checkPermission(): Boolean =
@@ -168,7 +171,12 @@ fun LimpioTheme(content: @Composable () -> Unit) {
 }
 
 @Composable
-fun LimpioApp(cleaner: MainViewModel, organizer: OrganizerViewModel, explorer: ExplorerViewModel) {
+fun LimpioApp(
+    cleaner: MainViewModel,
+    dups: DupViewModel,
+    organizer: OrganizerViewModel,
+    explorer: ExplorerViewModel,
+) {
     var tab by rememberSaveable { mutableIntStateOf(0) }
     Scaffold(
         contentWindowInsets = WindowInsets(0, 0, 0, 0),
@@ -181,11 +189,16 @@ fun LimpioApp(cleaner: MainViewModel, organizer: OrganizerViewModel, explorer: E
                 )
                 NavigationBarItem(
                     selected = tab == 1, onClick = { tab = 1 },
+                    icon = { Icon(Icons.Filled.ContentCopy, null) },
+                    label = { Text("Duplicados") }
+                )
+                NavigationBarItem(
+                    selected = tab == 2, onClick = { tab = 2 },
                     icon = { Icon(Icons.Filled.AutoAwesome, null) },
                     label = { Text("Organizar") }
                 )
                 NavigationBarItem(
-                    selected = tab == 2, onClick = { tab = 2 },
+                    selected = tab == 3, onClick = { tab = 3 },
                     icon = { Icon(Icons.Filled.Folder, null) },
                     label = { Text("Archivos") }
                 )
@@ -195,7 +208,8 @@ fun LimpioApp(cleaner: MainViewModel, organizer: OrganizerViewModel, explorer: E
         Box(Modifier.fillMaxSize().padding(bottom = pad.calculateBottomPadding())) {
             when (tab) {
                 0 -> CleanerTab(cleaner)
-                1 -> OrganizerTab(organizer)
+                1 -> DupTab(dups)
+                2 -> OrganizerTab(organizer)
                 else -> ExplorerTab(explorer)
             }
         }

@@ -61,8 +61,6 @@ fun categoryIcon(c: Category): ImageVector = when (c) {
     Category.LEFTOVERS -> Icons.Filled.Inventory2
     Category.EMPTY -> Icons.Filled.FolderOff
     Category.APKS -> Icons.Filled.Android
-    Category.DUPLICATES -> Icons.Filled.ContentCopy
-    Category.SIMILAR_VIDEOS -> Icons.Filled.VideoLibrary
     Category.WHATSAPP_SENT -> Icons.AutoMirrored.Filled.Send
     Category.OLD_DOWNLOADS -> Icons.Filled.Download
     Category.LARGE -> Icons.Filled.SdStorage
@@ -134,7 +132,7 @@ fun CleanerTab(vm: MainViewModel) {
                     selected = vm.selection[open].orEmpty(),
                     onToggle = { vm.toggle(open, it) },
                     onSetAll = { vm.setAll(open, it) },
-                    grouped = open in GROUPED_CATEGORIES,
+                    grouped = false,
                     destructive = true,
                     actionLabel = { n, s -> "Eliminar $n · ${formatSize(ctx, s)}" },
                     confirmTitle = { n -> "¿Eliminar $n elementos?" },
@@ -247,33 +245,14 @@ private fun CleanerHome(vm: MainViewModel) {
             }
             items(Category.entries.toList()) { cat ->
                 val list = result.items[cat].orEmpty()
-                val sp = vm.similarProgress
-                if (cat == Category.SIMILAR_VIDEOS && sp != null) {
-                    Card(Modifier.fillMaxWidth()) {
-                        Column(Modifier.padding(16.dp)) {
-                            Row(verticalAlignment = Alignment.CenterVertically) {
-                                Icon(categoryIcon(cat), null, tint = MaterialTheme.colorScheme.primary)
-                                Spacer(Modifier.width(16.dp))
-                                Text(
-                                    cat.title, style = MaterialTheme.typography.titleSmall,
-                                    fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f)
-                                )
-                                TextButton(onClick = { vm.cancelSimilar() }) { Text("Omitir") }
-                            }
-                            Spacer(Modifier.height(8.dp))
-                            ProgressBlock(sp, "Puedes usar lo demás mientras tanto")
-                        }
-                    }
-                } else {
-                    CategoryCard(cat, list.size, vm.totalSize(cat)) { vm.openCategory = cat }
-                }
+                CategoryCard(cat, list.size, vm.totalSize(cat)) { vm.openCategory = cat }
             }
         }
     }
 }
 
 @Composable
-private fun ProgressBlock(p: Phase.Scanning, detail: String) {
+fun ProgressBlock(p: Phase.Scanning, detail: String) {
     Column(Modifier.fillMaxWidth(), horizontalAlignment = Alignment.CenterHorizontally) {
         Text(p.stage.ifEmpty { "Analizando…" }, style = MaterialTheme.typography.titleSmall)
         Spacer(Modifier.height(8.dp))

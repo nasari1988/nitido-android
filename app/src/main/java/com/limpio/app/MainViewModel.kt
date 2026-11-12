@@ -43,11 +43,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     /** Si estás en la pantalla principal (no revisando una lista). */
     val onHome: Boolean get() = openCategory == null && !showQuick
 
-    /** Avance de la comparación de videos en segundo plano (null = no está corriendo). */
-    var similarProgress by mutableStateOf<Phase.Scanning?>(null)
-        private set
     private var scanJob: kotlinx.coroutines.Job? = null
-    private var similarJob: kotlinx.coroutines.Job? = null
 
     var storageTotal by mutableStateOf(0L)
         private set
@@ -69,8 +65,6 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
 
     fun scan() {
         if (phase is Phase.Scanning || phase is Phase.Cleaning) return
-        similarJob?.cancel()
-        similarProgress = null
         val scanner = Scanner(getApplication())
         val version = StorageChanges.version
         phase = Phase.Scanning(0)
@@ -105,49 +99,12 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
             scannedVersion = version
             phase = Phase.Ready
             refreshStorage()
-            startSimilar(scanner)
         }
     }
 
     fun cancelScan() {
         scanJob?.cancel()
         phase = if (result != null) Phase.Ready else Phase.Idle
-    }
-
-    fun cancelSimilar() {
-        similarJob?.cancel()
-        similarProgress = null
-    }
-
-    /** Videos parecidos: corre después, sin bloquear el resto de los resultados. */
-    private fun startSimilar(scanner: Scanner) {
-        if (scanner.similarInput.size < 2) return
-        similarJob = viewModelScope.launch {
-            similarProgress = Phase.Scanning(0, "Preparando videos")
-            val ticker = launch {
-                while (isActive) {
-                    similarProgress = Phase.Scanning(
-                        0, scanner.stage, scanner.stepDone.get(), scanner.stepTotal.get()
-                    )
-                    delay(200)
-                }
-            }
-            try {
-                val found = scanner.similarVideos()
-                    .filter { File(it.path).exists() }
-                    .groupBy { it.group }.values.filter { it.size > 1 }.flatten()
-                val r = result ?: return@launch
-                result = r.copy(items = r.items + (Category.SIMILAR_VIDEOS to found))
-                selection = selection + (Category.SIMILAR_VIDEOS to emptySet())
-            } catch (e: kotlinx.coroutines.CancellationException) {
-                throw e
-            } catch (e: Exception) {
-                message = "No se pudieron comparar los videos: ${e.message}"
-            } finally {
-                ticker.cancel()
-                similarProgress = null
-            }
-        }
     }
 
     fun toggleQuick(path: String) {
@@ -233,10 +190,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
 
         val newItems = r.items.mapValues { (cat, list) ->
             val kept = list.filterNot { gone(it.path) }
-            if (cat in GROUPED_CATEGORIES) {
-                // Un grupo con una sola copia ya no es duplicado.
-                kept.groupBy { it.group }.values.filter { it.size > 1 }.flatten()
-            } else kept
+            kept
         }
         result = r.copy(items = newItems)
         selection = selection.mapValues { (cat, sel) ->

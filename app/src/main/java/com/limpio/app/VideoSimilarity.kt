@@ -75,6 +75,41 @@ object VideoSimilarity {
         return dists.sum() / dists.size
     }
 
+    /** Para fotos (un solo "fotograma") se exige más parecido que en video. */
+    const val MAX_PHOTO_DISTANCE = 6
+
+    /**
+     * Pares de fotos parecidas sin comparar todas contra todas: si dos huellas difieren en
+     * 6 bits o menos, al menos uno de sus 8 bytes es idéntico (principio del palomar).
+     * Así solo se comparan fotos que comparten algún byte. Devuelve (i, j, distancia).
+     */
+    fun photoPairs(
+        hashes: List<Long?>,
+        ratios: List<Double>,
+        maxDist: Int = MAX_PHOTO_DISTANCE,
+    ): List<Triple<Int, Int, Int>> {
+        fun byteOf(h: Long, k: Int) = ((h ushr (k * 8)) and 0xff).toInt()
+        val out = ArrayList<Triple<Int, Int, Int>>()
+        for (k in 0 until 8) {
+            val buckets = HashMap<Int, MutableList<Int>>()
+            hashes.forEachIndexed { i, h ->
+                if (h != null) buckets.getOrPut(byteOf(h, k)) { ArrayList() }.add(i)
+            }
+            for (b in buckets.values) {
+                for (x in b.indices) for (y in x + 1 until b.size) {
+                    val i = b[x]; val j = b[y]
+                    val hi = hashes[i]!!; val hj = hashes[j]!!
+                    // Si ya coincidían en un byte anterior, ese par ya se revisó.
+                    if ((0 until k).any { byteOf(hi, it) == byteOf(hj, it) }) continue
+                    if (abs(ratios[i] - ratios[j]) > MAX_RATIO_DIFF) continue
+                    val d = java.lang.Long.bitCount(hi xor hj)
+                    if (d <= maxDist) out += Triple(min(i, j), max(i, j), d)
+                }
+            }
+        }
+        return out
+    }
+
     fun similarityPercent(distance: Int): Int = 100 - distance * 100 / 64
 
     /** Une los pares confirmados en grupos (si A≈B y B≈C, los tres van juntos). */

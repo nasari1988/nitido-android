@@ -25,18 +25,6 @@ enum class Category(val title: String, val description: String, val safe: Boolea
         "Archivos .apk. Vienen marcados los de apps que ya tienes instaladas.",
         true
     ),
-    DUPLICATES(
-        "Archivos duplicados",
-        "Copias idénticas byte por byte. De cada grupo se conserva la copia más antigua.",
-        false
-    ),
-    SIMILAR_VIDEOS(
-        "Videos parecidos",
-        "Videos que se ven igual aunque no sean idénticos byte por byte (reenviados, " +
-            "descargados dos veces o en otra resolución). Se comparan fotogramas del inicio, " +
-            "medio y final. Ninguno viene marcado: toca la miniatura para verlos y decide tú.",
-        false
-    ),
     WHATSAPP_SENT(
         "Enviados de WhatsApp",
         "Copias de fotos, videos y documentos que tú enviaste. El chat no se borra.",
@@ -62,13 +50,13 @@ data class CleanItem(
     /** Si viene marcado por defecto (y se borra en la limpieza rápida si la categoría es segura). */
     val preselected: Boolean,
     val note: String? = null,
+    /** Dato extra (p. ej. "Parecido 97% · 0:15"); la etiqueta final se arma en [note]. */
+    val detail: String? = null,
     /** Grupo de duplicados; -1 si no aplica. */
     val group: Int = -1,
 ) {
     val name: String get() = path.substringAfterLast('/')
 }
-
-val GROUPED_CATEGORIES = setOf(Category.DUPLICATES, Category.SIMILAR_VIDEOS)
 
 data class ScanResult(
     val items: Map<Category, List<CleanItem>>,

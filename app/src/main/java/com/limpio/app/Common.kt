@@ -61,6 +61,8 @@ fun ReviewList(
     confirmTitle: (count: Int) -> String,
     confirmText: (size: Long) -> String,
     onConfirm: () -> Unit,
+    onKeep: ((CleanItem) -> Unit)? = null,
+    groupTitle: ((List<CleanItem>) -> String)? = null,
 ) {
     val ctx = LocalContext.current
     val chosen = items.filter { it.path in selected }
@@ -101,16 +103,17 @@ fun ReviewList(
                 items(groups, key = { it.first().group }) { g ->
                     Card(Modifier.fillMaxWidth()) {
                         Text(
-                            if (g.all { it.size == g.first().size })
-                                "Grupo ${g.first().group + 1} · ${g.size} copias de " +
-                                    formatSize(ctx, g.first().size)
-                            else "Grupo ${g.first().group + 1} · ${g.size} videos parecidos",
+                            groupTitle?.invoke(g) ?: ("Grupo ${g.first().group + 1} · ${g.size} copias de " +
+                                formatSize(ctx, g.first().size)),
                             style = MaterialTheme.typography.labelLarge,
                             color = MaterialTheme.colorScheme.primary,
                             modifier = Modifier.padding(start = 14.dp, top = 12.dp, bottom = 4.dp)
                         )
                         g.forEach { item ->
-                            ItemRow(item, item.path in selected) { onToggle(item.path) }
+                            ItemRow(
+                                item, item.path in selected,
+                                onKeep = onKeep?.let { k -> { k(item) } },
+                            ) { onToggle(item.path) }
                         }
                         Spacer(Modifier.height(6.dp))
                     }
@@ -154,7 +157,15 @@ fun ReviewList(
 }
 
 @Composable
-fun ItemRow(item: CleanItem, checked: Boolean, onToggle: () -> Unit) {
+fun ItemRow(
+    item: CleanItem,
+    checked: Boolean,
+    onKeep: (() -> Unit)? = null,
+    onToggle: () -> Unit,
+) {
+    val kept = item.note?.let {
+        it.startsWith(Keep.KEPT_TAG) || it.startsWith("Original") || it.startsWith("El más antiguo")
+    } == true
     val ctx = LocalContext.current
     val location = Protection.relative(item.path).substringBeforeLast('/', "")
     Row(
@@ -180,9 +191,21 @@ fun ItemRow(item: CleanItem, checked: Boolean, onToggle: () -> Unit) {
             Text(
                 listOfNotNull(item.note, formatDate(item.lastModified)).joinToString(" · "),
                 style = MaterialTheme.typography.bodySmall,
-                color = if (item.note?.startsWith("Original") == true || item.note?.startsWith("El más antiguo") == true) MaterialTheme.colorScheme.primary
-                else MaterialTheme.colorScheme.onSurfaceVariant
+                color = if (kept) MaterialTheme.colorScheme.primary
+                else MaterialTheme.colorScheme.onSurfaceVariant,
+                fontWeight = if (kept) FontWeight.SemiBold else FontWeight.Normal
             )
+            if (onKeep != null && !kept) {
+                Text(
+                    "Conservar este",
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier
+                        .padding(top = 2.dp)
+                        .clickable(onClick = onKeep)
+                        .padding(vertical = 4.dp)
+                )
+            }
         }
         Spacer(Modifier.width(8.dp))
         if (!(item.isDir && item.size == 0L)) {
