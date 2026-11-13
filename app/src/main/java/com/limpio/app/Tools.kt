@@ -22,7 +22,6 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Apps
 import androidx.compose.material.icons.filled.AutoAwesome
-import androidx.compose.material.icons.filled.Cloud
 import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.Computer
 import androidx.compose.material.icons.filled.Lock
@@ -61,7 +60,6 @@ private val TOOLS = listOf(
     Tool("apps", "Apps instaladas", "Tamaño y sin usar", Icons.Filled.Apps, 0xFF0B7A5F, true),
     Tool("safe", "Carpeta segura", "Cifrada, con huella", Icons.Filled.Lock, 0xFF4E5D6C, true),
     Tool("pc", "Transferir a PC", "Por Wi‑Fi, sin cables", Icons.Filled.Computer, 0xFF2E8B3E, true),
-    Tool("drive", "Google Drive", "Subir y compartir enlaces", Icons.Filled.Cloud, 0xFF1A73E8, false),
 )
 
 /** Pestaña Herramientas: un tablero de herramientas; cada una se abre encima. */
