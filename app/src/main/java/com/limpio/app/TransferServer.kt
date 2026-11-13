@@ -9,8 +9,6 @@ import fi.iki.elonen.NanoHTTPD.newChunkedResponse
 import fi.iki.elonen.NanoHTTPD.newFixedLengthResponse
 import java.io.File
 import java.io.FileInputStream
-import java.io.PipedInputStream
-import java.io.PipedOutputStream
 import java.net.URLEncoder
 import java.security.SecureRandom
 import java.text.SimpleDateFormat
@@ -18,6 +16,8 @@ import java.util.Date
 import java.util.Locale
 import java.util.zip.ZipEntry
 import java.util.zip.ZipOutputStream
+import java.io.ByteArrayOutputStream
+import java.io.InputStream
 
 /**
  * Servidor web local para pasar archivos entre el teléfono y una computadora en la misma red Wi‑Fi.
@@ -91,6 +91,9 @@ class TransferServer(
     }
 
     private fun relOf(f: File) = f.canonicalPath.removePrefix(rootPath).trim('/')
+
+    /** Sin compresión: en la red local no ahorra nada y rompe las respuestas por partes (video). */
+    override fun useGzipWhenAccepted(r: Response): Boolean = false
 
     override fun serve(session: IHTTPSession): Response {
         lastActivity = System.currentTimeMillis()
@@ -177,21 +180,9 @@ class TransferServer(
         val dir = resolve(param(s, "p")) ?: return forbidden("Ruta no permitida")
         if (!dir.isDirectory) return notFound()
         val name = if (dir.canonicalPath == rootPath) "Almacenamiento" else dir.name
-        val pin = PipedInputStream(256 * 1024)
-        val pout = PipedOutputStream(pin)
-        Thread {
-            try {
-                ZipOutputStream(pout).use { z ->
-                    dir.walkTopDown().onEnter { !isHidden(it.absolutePath) }.filter { it.isFile }.forEach { f ->
-                        z.putNextEntry(ZipEntry("$name/" + f.relativeTo(dir).invariantSeparatorsPath).apply { time = f.lastModified() })
-                        FileInputStream(f).use { it.copyTo(z, 64 * 1024) }
-                        z.closeEntry()
-                    }
-                }
-            } catch (_: Exception) {
-                try { pout.close() } catch (_: Exception) {}
-            }
-        }.start()
+        val files = dir.walkTopDown().onEnter { !isHidden(it.absolutePath) }.filter { it.isFile }
+            .map { it to "$name/" + it.relativeTo(dir).invariantSeparatorsPath }.toList()
+        val pin = ZipFolderStream(files)
         onEvent("La computadora descargó la carpeta $name (ZIP)")
         return newChunkedResponse(Response.Status.OK, "application/zip", pin).apply {
             addHeader("Content-Disposition", "attachment; filename*=UTF-8''${enc("$name.zip")}")
@@ -370,5 +361,61 @@ class TransferServer(
                    ${if (entries.isEmpty()) "<p class=\"muted\">Carpeta vacía</p>" else ""}"""
             )
         )
+    }
+}
+
+/**
+ * Genera un ZIP "al vuelo" mientras se lee, sin hilos ni archivos temporales:
+ * cada lectura comprime el siguiente pedazo del archivo actual.
+ */
+class ZipFolderStream(files: List<Pair<File, String>>) : InputStream() {
+    private class Buffer : ByteArrayOutputStream() {
+        fun take(): ByteArray = toByteArray().also { reset() }
+    }
+    private val buf = Buffer()
+    private val zip = ZipOutputStream(buf)
+    private val iter = files.iterator()
+    private var current: FileInputStream? = null
+    private var pending = ByteArray(0)
+    private var pos = 0
+    private var finished = false
+    private val chunk = ByteArray(64 * 1024)
+
+    private fun fill(): Boolean {
+        while (pos >= pending.size) {
+            if (finished) return false
+            val c = current
+            if (c == null) {
+                if (iter.hasNext()) {
+                    val (f, name) = iter.next()
+                    zip.putNextEntry(ZipEntry(name).apply { time = f.lastModified() })
+                    current = try { FileInputStream(f) } catch (e: Exception) { zip.closeEntry(); null }
+                } else {
+                    zip.finish()
+                    finished = true
+                }
+            } else {
+                val n = c.read(chunk)
+                if (n < 0) { c.close(); current = null; zip.closeEntry() } else zip.write(chunk, 0, n)
+            }
+            pending = buf.take()
+            pos = 0
+        }
+        return true
+    }
+
+    override fun read(): Int = if (!fill()) -1 else pending[pos++].toInt() and 0xff
+
+    override fun read(b: ByteArray, off: Int, len: Int): Int {
+        if (len == 0) return 0
+        if (!fill()) return -1
+        val n = minOf(len, pending.size - pos)
+        System.arraycopy(pending, pos, b, off, n)
+        pos += n
+        return n
+    }
+
+    override fun close() {
+        try { current?.close() } catch (_: Exception) {}
     }
 }

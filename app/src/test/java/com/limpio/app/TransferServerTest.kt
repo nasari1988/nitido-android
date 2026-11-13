@@ -41,3 +41,27 @@ class TransferServerTest {
         assertEquals("&lt;script&gt;&quot;x&quot;&amp;&#39;", TransferServer.esc("<script>\"x\"&'"))
     }
 }
+
+class ZipFolderStreamTest {
+    @get:Rule
+    val tmp = TemporaryFolder()
+
+    @Test
+    fun zipAlVueloSeLeeCompleto() {
+        val d = tmp.newFolder("Viaje")
+        val big = kotlin.random.Random(3).nextBytes(300_000)
+        java.io.File(d, "grande.bin").writeBytes(big)
+        java.io.File(d, "sub").mkdirs()
+        java.io.File(d, "sub/nota.txt").writeText("hola")
+        java.io.File(d, "vacio.txt").writeText("")
+        val files = d.walkTopDown().filter { it.isFile }.map { it to "Viaje/" + it.relativeTo(d).invariantSeparatorsPath }.toList()
+        val bytes = ZipFolderStream(files).use { it.readBytes() }
+        val got = HashMap<String, ByteArray>()
+        java.util.zip.ZipInputStream(bytes.inputStream()).use { z ->
+            while (true) { val e = z.nextEntry ?: break; got[e.name] = z.readBytes() }
+        }
+        assertEquals(setOf("Viaje/grande.bin", "Viaje/sub/nota.txt", "Viaje/vacio.txt"), got.keys)
+        org.junit.Assert.assertArrayEquals(big, got["Viaje/grande.bin"])
+        assertEquals("hola", String(got.getValue("Viaje/sub/nota.txt")))
+    }
+}

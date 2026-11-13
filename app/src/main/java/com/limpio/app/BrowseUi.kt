@@ -460,13 +460,11 @@ private fun ListScreen(vm: BrowseViewModel, snackbar: SnackbarHostState, onMoveT
                                     MenuItem("Copiar ruta", Icons.Filled.Link) { selMenu = false; vm.clearSelection(); FileOps.copyPath(ctx, single.path) }
                                 }
                                 MenuItem("Comprimir en ZIP", Icons.Filled.Archive) { selMenu = false; vm.compress() }
-                                if (sel.none { it.isDir }) {
-                                    MenuItem("Mover a carpeta segura", Icons.Filled.Lock) {
-                                        selMenu = false
-                                        val paths = vm.selection.toList()
-                                        vm.clearSelection()
-                                        onMoveToVault(paths)
-                                    }
+                                MenuItem("Mover a carpeta segura", Icons.Filled.Lock) {
+                                    selMenu = false
+                                    val paths = vm.selection.toList()
+                                    vm.clearSelection()
+                                    onMoveToVault(paths)
                                 }
                                 MenuItem("Seleccionar todo", Icons.Filled.SelectAll) { selMenu = false; vm.selectAll() }
                             }

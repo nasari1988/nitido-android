@@ -22,6 +22,7 @@ import androidx.fragment.app.FragmentActivity
 import org.json.JSONArray
 import org.json.JSONObject
 import java.io.ByteArrayOutputStream
+import kotlinx.coroutines.launch
 import java.io.File
 import java.io.FileInputStream
 import java.io.FileOutputStream
@@ -41,6 +42,8 @@ data class VaultItem(
     val size: Long,
     val modified: Long,
     val added: Long,
+    /** Carpeta de la que vino (si se guardó una carpeta completa); vacío = archivo suelto. */
+    val album: String = "",
 ) {
     val kind: FileKind get() = FileTypes.kindOf(name)
 }
@@ -64,6 +67,12 @@ object Vault {
     var message by mutableStateOf<String?>(null)
     /** Archivos elegidos en el explorador esperando a que desbloquees para guardarse. */
     var pendingImport by mutableStateOf<List<String>>(emptyList())
+    /** Álbum (carpeta guardada) que se está viendo dentro de la carpeta segura. */
+    var openAlbum by mutableStateOf<String?>(null)
+    var importing by mutableStateOf(false)
+        private set
+    private var lockWhenDone = false
+    private val scope = kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.SupervisorJob() + kotlinx.coroutines.Dispatchers.Main)
 
     private var dataKey: SecretKey? = null
 
@@ -175,6 +184,9 @@ object Vault {
     }
 
     fun lock() {
+        // Nunca se bloquea a mitad de guardar: se espera a que termine.
+        if (importing) { lockWhenDone = true; return }
+        openAlbum = null
         dataKey = null
         unlocked = false
         items = emptyList()
@@ -189,16 +201,19 @@ object Vault {
         val arr = JSONArray(String(VaultCrypto.decryptBytes(key, f.readBytes())))
         return (0 until arr.length()).map { i ->
             val o = arr.getJSONObject(i)
-            VaultItem(o.getString("id"), o.getString("name"), o.getString("path"), o.getLong("size"), o.getLong("modified"), o.getLong("added"))
+            VaultItem(
+                o.getString("id"), o.getString("name"), o.getString("path"), o.getLong("size"),
+                o.getLong("modified"), o.getLong("added"), o.optString("album", "")
+            )
         }.sortedByDescending { it.added }
     }
 
-    private fun writeIndex(ctx: Context, list: List<VaultItem>) {
-        val key = dataKey ?: return
+    private fun writeIndex(ctx: Context, list: List<VaultItem>, key: SecretKey? = dataKey) {
+        key ?: return
         val arr = JSONArray()
         list.forEach {
             arr.put(JSONObject().put("id", it.id).put("name", it.name).put("path", it.originalPath)
-                .put("size", it.size).put("modified", it.modified).put("added", it.added))
+                .put("size", it.size).put("modified", it.modified).put("added", it.added).put("album", it.album))
         }
         val tmp = File(indexFile(ctx).absolutePath + ".tmp")
         tmp.writeBytes(VaultCrypto.encryptBytes(key, arr.toString().toByteArray()))
@@ -208,16 +223,52 @@ object Vault {
 
     // ---------- Operaciones (llamar fuera del hilo principal) ----------
 
+    /**
+     * Guarda archivos y carpetas completas en segundo plano (sigue aunque salgas de la pantalla).
+     * La carpeta no se bloquea hasta terminar.
+     */
+    fun startImport(ctx: Context, paths: List<String>) {
+        if (importing || paths.isEmpty()) return
+        val app = ctx.applicationContext
+        importing = true
+        busy = "Preparando…"
+        scope.launch {
+            val (ok, total) = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                import(app, paths) { i, n -> scope.launch { busy = "Cifrando ${i + 1} de $n…" } }
+            }
+            busy = null
+            importing = false
+            message = when {
+                total == 0 -> "No había archivos para guardar"
+                ok == total -> "Se guardaron $ok archivos en la carpeta segura"
+                else -> "Se guardaron $ok de $total (los demás quedaron donde estaban)"
+            }
+            StorageChanges.bump()
+            if (lockWhenDone) { lockWhenDone = false; lock() }
+        }
+    }
+
     /** Guarda los archivos cifrados y borra los originales SOLO si la copia se verificó. */
-    fun import(ctx: Context, paths: List<String>, onProgress: (Int) -> Unit = {}): Pair<Int, Int> {
+    private fun import(ctx: Context, paths: List<String>, onProgress: (Int, Int) -> Unit): Pair<Int, Int> {
         val key = dataKey ?: return 0 to paths.size
+        // Expandir carpetas: cada archivo recuerda de qué carpeta (álbum) vino.
+        val work = ArrayList<Pair<File, String>>()
+        val folders = ArrayList<File>()
+        for (p in paths) {
+            val f = File(p)
+            if (Protection.isHiddenSystem(p)) continue
+            if (f.isDirectory) {
+                folders += f
+                f.walkTopDown().onEnter { !Protection.isHiddenSystem(it.absolutePath) }
+                    .filter { it.isFile && !Protection.isProtected(it.absolutePath) }
+                    .forEach { work += it to f.name }
+            } else if (f.isFile && !Protection.isProtected(p)) work += f to ""
+        }
         var ok = 0
         val list = items.toMutableList()
         val removed = ArrayList<String>()
-        paths.forEachIndexed { i, p ->
-            onProgress(i)
-            val src = File(p)
-            if (!src.isFile || Protection.isProtected(p)) return@forEachIndexed
+        work.forEachIndexed { i, (src, album) ->
+            onProgress(i, work.size)
             val id = UUID.randomUUID().toString()
             val out = dataFile(ctx, id)
             try {
@@ -226,16 +277,23 @@ object Vault {
                 val check = FileInputStream(out).use { VaultCrypto.decrypt(key, it, NullOutput) }
                 if (!sha.contentEquals(check)) throw SecurityException("La verificación no coincidió")
                 makeThumb(src)?.let { thumbFile(ctx, id).writeBytes(VaultCrypto.encryptBytes(key, it)) }
-                list += VaultItem(id, src.name, p, src.length(), src.lastModified(), System.currentTimeMillis())
-                writeIndex(ctx, list)
-                if (FileOps.deletePermanently(src)) removed += p
+                list += VaultItem(id, src.name, src.absolutePath, src.length(), src.lastModified(), System.currentTimeMillis(), album)
+                // El índice se guarda con la llave capturada: aunque se bloquee, nada queda sin registrar.
+                writeIndex(ctx, list, key)
+                if (FileOps.deletePermanently(src)) removed += src.absolutePath
                 ok++
             } catch (e: Exception) {
                 out.delete(); thumbFile(ctx, id).delete()
             }
         }
+        // Quitar las carpetas que quedaron vacías (nunca las del sistema).
+        folders.forEach { root ->
+            root.walkBottomUp().filter { it.isDirectory }.forEach { d ->
+                if (d.list()?.isEmpty() == true && !Protection.isProtected(d.absolutePath)) d.delete()
+            }
+        }
         FileOps.rescan(ctx, removed)
-        return ok to paths.size
+        return ok to work.size
     }
 
     /** Descifra a un archivo temporal privado para verlo dentro de la app. */
@@ -272,7 +330,7 @@ object Vault {
                 dest.delete()
             }
         }
-        writeIndex(ctx, list)
+        writeIndex(ctx, list, key)
         FileOps.rescan(ctx, restored)
         return ok
     }

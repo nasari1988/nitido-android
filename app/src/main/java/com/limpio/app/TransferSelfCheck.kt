@@ -25,6 +25,7 @@ object TransferSelfCheck {
         c.requestMethod = method
         c.connectTimeout = 5000; c.readTimeout = 10000
         cookie?.let { c.setRequestProperty("Cookie", it) }
+        c.setRequestProperty("Accept-Encoding", "identity")
         range?.let { c.setRequestProperty("Range", it) }
         if (body != null) {
             c.doOutput = true
@@ -68,7 +69,9 @@ object TransferSelfCheck {
         if (!call("$base/dl?p=hola.txt", cookie = cookie).body.contentEquals(data)) fails += "la descarga no coincide"
 
         val part = call("$base/raw?p=hola.txt", cookie = cookie, range = "bytes=10-19")
-        if (part.code != 206 || !part.body.contentEquals(data.copyOfRange(10, 20))) fails += "no respondió por partes (video)"
+        if (part.code != 206 || !part.body.contentEquals(data.copyOfRange(10, 20))) {
+            fails += "no respondió por partes (video): código ${part.code}, ${part.body.size} bytes, ${part.header("Content-Encoding") ?: "sin compresión"}"
+        }
 
         if (call("$base/dl?p=../../../etc/hosts", cookie = cookie).code !in listOf(403, 404)) fails += "permitió salirse de la carpeta"
 
@@ -83,7 +86,14 @@ object TransferSelfCheck {
         setReadOnly(false)
 
         val zip = call("$base/zip?p=", cookie = cookie)
-        if (zip.code != 200 || zip.body.size < 100 || zip.body[0] != 'P'.code.toByte()) fails += "no generó el ZIP de la carpeta"
+        val names = try {
+            java.util.zip.ZipInputStream(zip.body.inputStream()).use { z ->
+                generateSequence { z.nextEntry }.map { it.name }.toList()
+            }
+        } catch (e: Exception) { listOf("error: ${e.message}") }
+        if (zip.code != 200 || names.none { it.endsWith("hola.txt") }) {
+            fails += "no generó el ZIP de la carpeta: código ${zip.code}, ${zip.body.size} bytes, contenido $names"
+        }
         return fails
     }
 }

@@ -80,28 +80,33 @@ fun VaultScreen(browse: BrowseViewModel, onExit: () -> Unit, onGoExplore: () -> 
     var confirmDelete by remember { mutableStateOf(false) }
 
     fun exit() { Vault.lock(); onExit() }
-    BackHandler { if (selection.isNotEmpty()) selection = emptySet() else exit() }
+    BackHandler {
+        when {
+            selection.isNotEmpty() -> selection = emptySet()
+            Vault.openAlbum != null -> Vault.openAlbum = null
+            else -> exit()
+        }
+    }
 
-    // Si llegaron archivos desde el explorador, se guardan en cuanto la carpeta está abierta.
+    // Si llegaron archivos o carpetas desde el explorador, se guardan en cuanto la carpeta está abierta.
     LaunchedEffect(Vault.unlocked, Vault.pendingImport) {
         val pend = Vault.pendingImport
-        if (Vault.unlocked && pend.isNotEmpty() && Vault.busy == null) {
+        if (Vault.unlocked && pend.isNotEmpty() && !Vault.importing) {
             Vault.pendingImport = emptyList()
-            Vault.busy = "Cifrando ${pend.size} archivos…"
-            val (ok, total) = withContext(Dispatchers.IO) {
-                Vault.import(ctx, pend) { i -> Vault.busy = "Cifrando ${i + 1} de ${pend.size}…" }
-            }
-            Vault.busy = null
-            Vault.message = if (ok == total) "Se guardaron $ok archivos en la carpeta segura" else "Se guardaron $ok de $total (los demás quedaron donde estaban)"
-            StorageChanges.bump()
+            Vault.startImport(ctx, pend)
         }
     }
 
     Column(Modifier.fillMaxSize().statusBarsPadding()) {
         Row(Modifier.padding(4.dp), verticalAlignment = Alignment.CenterVertically) {
             if (selection.isEmpty()) {
-                IconButton(onClick = { exit() }) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "Atrás") }
-                Text("Carpeta segura", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f))
+                IconButton(onClick = { if (Vault.openAlbum != null) Vault.openAlbum = null else exit() }) {
+                    Icon(Icons.AutoMirrored.Filled.ArrowBack, "Atrás")
+                }
+                Text(
+                    Vault.openAlbum ?: "Carpeta segura", style = MaterialTheme.typography.titleLarge,
+                    fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f), maxLines = 1, overflow = TextOverflow.Ellipsis
+                )
                 if (Vault.unlocked) IconButton(onClick = { Vault.lock() }) { Icon(Icons.Filled.Lock, "Bloquear") }
             } else {
                 IconButton(onClick = { selection = emptySet() }) { Icon(Icons.Filled.Close, "Cancelar") }
@@ -145,7 +150,10 @@ fun VaultScreen(browse: BrowseViewModel, onExit: () -> Unit, onGoExplore: () -> 
             return@Column
         }
 
-        val items = Vault.items
+        val album = Vault.openAlbum
+        val items = if (album != null) Vault.items.filter { it.album == album }.sortedBy { it.name.lowercase() }
+        else Vault.items.filter { it.album.isEmpty() }
+        val albums = if (album != null) emptyList() else Vault.items.filter { it.album.isNotEmpty() }.groupBy { it.album }.toList().sortedBy { it.first.lowercase() }
         LazyVerticalGrid(
             columns = GridCells.Adaptive(108.dp),
             contentPadding = PaddingValues(12.dp),
@@ -153,18 +161,48 @@ fun VaultScreen(browse: BrowseViewModel, onExit: () -> Unit, onGoExplore: () -> 
             verticalArrangement = Arrangement.spacedBy(10.dp),
             modifier = Modifier.fillMaxSize()
         ) {
-            item(span = { GridItemSpan(maxLineSpan) }) {
+            if (album == null) item(span = { GridItemSpan(maxLineSpan) }) {
                 Column(Modifier.fillMaxWidth().glass().padding(14.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                     Text(
-                        "${items.size} archivos · ${formatSize(ctx, items.sumOf { it.size })} · cifrados con AES‑256",
+                        "${Vault.items.size} archivos · ${formatSize(ctx, Vault.items.sumOf { it.size })} · cifrados con AES‑256",
                         fontWeight = FontWeight.SemiBold
                     )
                     Text(
-                        "Para agregar: en el explorador mantén presionado un archivo › Más › Mover a carpeta segura. " +
+                        "Para agregar: en el explorador mantén presionado un archivo o una carpeta › Más › Mover a carpeta segura. " +
                             "Mantén presionado aquí para sacar o eliminar.",
                         style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                     OutlinedButton(onClick = onGoExplore) { Text("Ir al explorador") }
+                }
+            }
+            items(albums, key = { "album:" + it.first }) { (name, list) ->
+                val ids = list.map { it.id }.toSet()
+                val allSel = ids.isNotEmpty() && selection.containsAll(ids)
+                Column(
+                    Modifier.clip(RoundedCornerShape(14.dp))
+                        .background(if (allSel) MaterialTheme.colorScheme.primaryContainer else Color.Transparent)
+                        .combinedClickable(
+                            onClick = {
+                                if (selection.isNotEmpty()) selection = if (allSel) selection - ids else selection + ids
+                                else Vault.openAlbum = name
+                            },
+                            onLongClick = { selection = if (allSel) selection - ids else selection + ids }
+                        )
+                        .padding(4.dp)
+                ) {
+                    Box(Modifier.fillMaxWidth().aspectRatio(1f)) {
+                        VaultThumb(list.first())
+                        Box(
+                            Modifier.align(Alignment.BottomStart).padding(6.dp).clip(RoundedCornerShape(8.dp))
+                                .background(Color(0x99000000)).padding(horizontal = 6.dp, vertical = 2.dp)
+                        ) { Text("${list.size}", color = Color.White, style = MaterialTheme.typography.labelSmall) }
+                        if (allSel) Icon(
+                            Icons.Filled.CheckCircle, "Seleccionado", tint = MaterialTheme.colorScheme.primary,
+                            modifier = Modifier.align(Alignment.TopEnd).padding(4.dp).size(22.dp).clip(CircleShape).background(Color.White)
+                        )
+                    }
+                    Text(name, style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(top = 4.dp))
+                    Text("Carpeta · ${formatSize(ctx, list.sumOf { it.size })}", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
             }
             items(items, key = { it.id }) { item ->
