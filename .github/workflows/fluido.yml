@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
     inputs:
       que:
-        description: "Qué convertir: fluido (RIFE), realismo (PiSA-SR) o limpiar (RealBasicVSR, prueba)"
+        description: "Qué convertir: fluido (RIFE), realismo (PiSA-SR), limpiar-npu (RealBasicVSR) o enfocar-npu (NAFNet al paquete de restauración)"
         default: fluido
 
 jobs:
@@ -34,6 +34,7 @@ jobs:
             realismo) bash ci/pisa_build.sh ;;
             limpiar) bash ci/rbvsr_build.sh ;;
             limpiar-npu) bash ci/rbvsr_npu_build.sh ;;
+            enfocar-npu) bash ci/nafnet_build.sh ;;
             *) bash ci/rife_build.sh ;;
           esac
       # Limpiar (prueba): the checked weights for a private test run elsewhere; never published
@@ -66,6 +67,17 @@ jobs:
           GH_REPO: ${{ github.repository }}
         run: |
           ls -la out
+          if [ "${{ inputs.que }}" = "enfocar-npu" ]; then
+            # NAFNet's NPU files go into the restoration pack; its list gets them (the app offers the update)
+            T=modelo-restauracion
+            gh release download "$T" -p files.txt -O old_files.txt
+            gh release upload "$T" out/rest_*.npu* out/check_* --clobber
+            grep -v -E '^(rest_deblur|rest_denoise)\.npu' old_files.txt > files.txt || true
+            (cd out && for f in rest_*.npu*; do echo "$f $(stat -c %s "$f")"; done) >> files.txt
+            cat files.txt
+            gh release upload "$T" files.txt --clobber
+            exit 0
+          fi
           TAG="modelo-${{ inputs.que }}"
           gh release view "$TAG" >/dev/null 2>&1 || gh release create "$TAG" --title "$TAG" --notes "La app lo descarga sola." --latest=false
           gh release upload "$TAG" out/* --clobber
