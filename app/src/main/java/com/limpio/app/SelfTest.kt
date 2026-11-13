@@ -66,6 +66,10 @@ import java.text.DateFormat
 import java.util.Date
 import kotlin.coroutines.resume
 import kotlin.random.Random
+import androidx.media3.common.MediaItem
+import androidx.media3.common.PlaybackException
+import androidx.media3.common.Player
+import androidx.media3.exoplayer.ExoPlayer
 
 enum class TestStatus(val label: String) { OK("Correcta"), FAIL("Falla"), WARN("Aviso"), SKIP("Omitida") }
 
@@ -87,7 +91,7 @@ class SelfTestViewModel(app: Application) : AndroidViewModel(app) {
 
     private val ctx: Context get() = getApplication()
     private val sandbox = File(Protection.rootPath, "Download/ArchivosAutoprueba")
-    val total = 15
+    val total = 20
 
     fun run() {
         if (running) return
@@ -266,6 +270,59 @@ class SelfTestViewModel(app: Application) : AndroidViewModel(app) {
             }
         }
 
+        test("Reproducción de audio (tono de prueba)") {
+            val wav = File(sandbox, "tono.wav")
+            writeTone(wav, seconds = 2)
+            withContext(Dispatchers.Main) {
+                val p = ExoPlayer.Builder(ctx).build()
+                try {
+                    p.volume = 0f
+                    p.setMediaItem(MediaItem.fromUri(Uri.fromFile(wav)))
+                    p.prepare()
+                    val ready = awaitReady(p)
+                    val d = p.duration
+                    check(ready && d in 1800..2200, "Audio preparado: ${d} ms", "No se pudo preparar (listo=$ready, duración=$d)")
+                } finally { p.release() }
+            }
+        }
+
+        test("Música en segundo plano (servicio)") {
+            val okConn = withContext(Dispatchers.Main) { Music.awaitConnected(ctx) }
+            check(okConn, "El servicio de música respondió", "El servicio no respondió a tiempo")
+        }
+
+        test("Reproductor de video") {
+            val v = MediaQueries.category(ctx, BrowseCategory.VIDEOS).firstOrNull()
+            if (v == null) TestStatus.SKIP to "No hay videos en el teléfono" else withContext(Dispatchers.Main) {
+                val p = ExoPlayer.Builder(ctx).build()
+                try {
+                    p.volume = 0f
+                    p.setMediaItem(videoItem(v.path))
+                    p.prepare()
+                    val ready = awaitReady(p)
+                    val w = p.videoFormat?.width ?: 0
+                    val h = p.videoFormat?.height ?: 0
+                    check(ready && w > 0, "Preparado ${w}×$h (solo lectura, sin sonido)", "No se pudo preparar ${v.name}")
+                } finally { p.release() }
+            }
+        }
+
+        test("Recordar posición de video") {
+            val fake = File(sandbox, "pelicula.mp4").absolutePath
+            VideoPositions.save(ctx, fake, 754_000, 6_000_000)
+            val got = VideoPositions.get(ctx, fake)
+            VideoPositions.save(ctx, fake, 0, 0)
+            check(got == 754_000L && VideoPositions.get(ctx, fake) == 0L, "Guarda y olvida la posición", "Leído: $got")
+        }
+
+        test("Subtítulos automáticos") {
+            val vid = File(sandbox, "pelicula.mp4").apply { writeText("x") }
+            File(sandbox, "pelicula.srt").writeText("1\n00:00:01,000 --> 00:00:02,000\nHola\n")
+            val sub = MediaUtil.findSubtitle(vid)
+            val cfg = videoItem(vid.absolutePath).localConfiguration?.subtitleConfigurations.orEmpty()
+            check(sub?.name == "pelicula.srt" && cfg.size == 1, "Encontró pelicula.srt y lo agregó al video", "No los encontró")
+        }
+
         test("Fondo de pantalla para el vidrio") {
             val d = try { WallpaperManager.getInstance(ctx).drawable } catch (e: Exception) { null }
             if (d != null) ok("Se puede leer tu fondo") else TestStatus.WARN to "No se pudo leer: se usan colores suaves"
@@ -284,6 +341,33 @@ class SelfTestViewModel(app: Application) : AndroidViewModel(app) {
             val junk = r.items.filterKeys { it.safe }.values.flatten().sumOf { it.size }
             ok("${r.filesScanned} archivos en ${"%.1f".format(r.durationMs / 1000.0)} s · basura segura: ${formatSize(ctx, junk)}")
         }
+    }
+
+    private suspend fun awaitReady(p: ExoPlayer): Boolean = withTimeoutOrNull(10_000) {
+        suspendCancellableCoroutine<Boolean> { c ->
+            if (p.playbackState == Player.STATE_READY) { c.resume(true); return@suspendCancellableCoroutine }
+            val l = object : Player.Listener {
+                override fun onPlaybackStateChanged(state: Int) {
+                    if (state == Player.STATE_READY && c.isActive) { p.removeListener(this); c.resume(true) }
+                }
+                override fun onPlayerError(error: PlaybackException) {
+                    if (c.isActive) { p.removeListener(this); c.resume(false) }
+                }
+            }
+            p.addListener(l)
+        }
+    } ?: false
+
+    /** Tono de 440 Hz en WAV (PCM 16 bits, mono, 44.1 kHz). */
+    private fun writeTone(f: File, seconds: Int) {
+        val rate = 44_100
+        val n = rate * seconds
+        val data = java.nio.ByteBuffer.allocate(44 + n * 2).order(java.nio.ByteOrder.LITTLE_ENDIAN)
+        data.put("RIFF".toByteArray()).putInt(36 + n * 2).put("WAVE".toByteArray())
+        data.put("fmt ".toByteArray()).putInt(16).putShort(1).putShort(1).putInt(rate).putInt(rate * 2).putShort(2).putShort(16)
+        data.put("data".toByteArray()).putInt(n * 2)
+        for (i in 0 until n) data.putShort((Math.sin(2 * Math.PI * 440 * i / rate) * 8000).toInt().toShort())
+        f.writeBytes(data.array())
     }
 
     fun report(): String {

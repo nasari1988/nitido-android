@@ -136,15 +136,19 @@ fun browseIcon(c: BrowseCategory): ImageVector = when (c) {
 }
 
 @Composable
-fun BrowseTab(vm: BrowseViewModel, cleanable: Long? = null, onClean: () -> Unit) {
+fun BrowseTab(vm: BrowseViewModel, music: MusicViewModel, cleanable: Long? = null, onClean: () -> Unit) {
     val snackbar = remember { SnackbarHostState() }
     LaunchedEffect(vm.message) { vm.message?.let { snackbar.showSnackbar(it); vm.message = null } }
     LaunchedEffect(Unit) { vm.load() }
-    BackHandler(enabled = vm.selection.isNotEmpty() || vm.stack.size > 1) {
+    BackHandler(enabled = vm.screen != Screen.Music && (vm.selection.isNotEmpty() || vm.stack.size > 1)) {
         if (vm.selection.isNotEmpty()) vm.clearSelection() else vm.back()
     }
     Box(Modifier.fillMaxSize()) {
-        if (vm.screen == Screen.Home) HomeScreen(vm, cleanable, onClean) else ListScreen(vm, snackbar)
+        when (vm.screen) {
+            Screen.Home -> HomeScreen(vm, cleanable, onClean)
+            Screen.Music -> MusicLibraryScreen(music, onBack = { vm.back() })
+            else -> ListScreen(vm, snackbar)
+        }
         if (vm.screen == Screen.Home) {
             SnackbarHost(snackbar, Modifier.align(Alignment.BottomCenter))
         }
@@ -342,7 +346,11 @@ private fun HomeScreen(vm: BrowseViewModel, cleanable: Long?, onClean: () -> Uni
                     items(vm.recent, key = { it.path }) { e ->
                         Column(
                             Modifier.width(96.dp).clip(RoundedCornerShape(12.dp)).clickable {
-                                if (e.isViewable) vm.openViewer(vm.recent, e) else FileOps.open(ctx, e.path)
+                                when (e.kind) {
+                                    FileKind.VIDEO -> Playback.playVideo(listOf(e.path), 0)
+                                    FileKind.AUDIO -> { Music.playFiles(ctx, listOf(e.path), 0); Music.showNowPlaying = true }
+                                    else -> if (e.isViewable) vm.openViewer(vm.recent, e) else FileOps.open(ctx, e.path)
+                                }
                             }
                         ) {
                             FileThumb(e.path, false, modifier = Modifier.size(96.dp))
@@ -413,7 +421,7 @@ private fun ListScreen(vm: BrowseViewModel, snackbar: SnackbarHostState) {
         is Screen.Folder -> if (s.path == vm.root) "Almacenamiento interno" else File(s.path).name
         is Screen.Cat -> s.cat.label
         Screen.Search -> "Buscar"
-        Screen.Home -> ""
+        Screen.Home, Screen.Music -> ""
     }
 
     Scaffold(

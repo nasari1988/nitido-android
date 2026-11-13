@@ -59,6 +59,9 @@ import coil3.ImageLoader
 import coil3.compose.setSingletonImageLoaderFactory
 import coil3.request.crossfade
 import coil3.video.VideoFrameDecoder
+import coil3.gif.AnimatedImageDecoder
+import coil3.gif.GifDecoder
+import androidx.compose.runtime.LaunchedEffect
 
 class MainActivity : ComponentActivity() {
 
@@ -67,6 +70,7 @@ class MainActivity : ComponentActivity() {
     private val browse: BrowseViewModel by viewModels()
     private val dups: DupViewModel by viewModels()
     private val selfTest: SelfTestViewModel by viewModels()
+    private val music: MusicViewModel by viewModels()
     private var hasPermission by mutableStateOf(false)
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -76,14 +80,17 @@ class MainActivity : ComponentActivity() {
         setContent {
             setSingletonImageLoaderFactory { ctx ->
                 ImageLoader.Builder(ctx)
-                    .components { add(VideoFrameDecoder.Factory()) }
+                    .components {
+                        add(VideoFrameDecoder.Factory())
+                        if (Build.VERSION.SDK_INT >= 28) add(AnimatedImageDecoder.Factory()) else add(GifDecoder.Factory())
+                    }
                     .crossfade(true)
                     .build()
             }
             ArchivosTheme {
                 Box(Modifier.fillMaxSize()) {
                     GlassBackground()
-                    if (hasPermission) ArchivosApp(browse, cleaner, dups, organizer, selfTest)
+                    if (hasPermission) ArchivosApp(browse, cleaner, dups, organizer, selfTest, music)
                     else PermissionScreen()
                 }
             }
@@ -170,7 +177,10 @@ fun ArchivosApp(
     dups: DupViewModel,
     organizer: OrganizerViewModel,
     selfTest: SelfTestViewModel,
+    music: MusicViewModel,
 ) {
+    val ctx = LocalContext.current
+    LaunchedEffect(Unit) { Music.connect(ctx) }
     var tab by rememberSaveable { mutableIntStateOf(0) }
     var tool by rememberSaveable { mutableStateOf<String?>(null) }
     val nav = listOf(
@@ -183,6 +193,8 @@ fun ArchivosApp(
             containerColor = Color.Transparent,
             contentWindowInsets = WindowInsets(0, 0, 0, 0),
             bottomBar = {
+                Column {
+                MiniPlayer()
                 GlassNavBar(nav, tab) { i ->
                     when {
                         i == tab && i == 0 -> browse.goHome()
@@ -190,12 +202,14 @@ fun ArchivosApp(
                         else -> tab = i
                     }
                 }
+                }
             }
         ) { pad ->
             Box(Modifier.fillMaxSize().padding(bottom = pad.calculateBottomPadding())) {
                 when (tab) {
                     0 -> BrowseTab(
                         browse,
+                        music,
                         cleanable = cleaner.result?.let { cleaner.quickCleanItems().sumOf { it.size } },
                         onClean = { tab = 1 },
                     )
@@ -214,8 +228,10 @@ fun ArchivosApp(
                 }
             }
         }
-        // Visor a pantalla completa (encima de todo, incluida la barra inferior).
+        // Pantallas completas encima de todo (incluida la barra inferior).
         if (browse.viewer != null) MediaViewer(browse)
+        if (Music.showNowPlaying) NowPlayingScreen()
+        Playback.video?.let { req -> VideoPlayerScreen(req, onClose = { Playback.video = null }) }
         DetailsDialog(browse)
     }
 }

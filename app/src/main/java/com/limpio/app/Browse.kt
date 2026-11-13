@@ -74,6 +74,7 @@ sealed interface Screen {
     data class Folder(val path: String) : Screen
     data class Cat(val cat: BrowseCategory) : Screen
     data object Search : Screen
+    data object Music : Screen
 }
 
 data class Volume(val label: String, val path: String, val total: Long, val free: Long, val primary: Boolean)
@@ -281,8 +282,11 @@ class BrowseViewModel(app: Application) : AndroidViewModel(app) {
 
     fun openFolder(path: String) = navigate(Screen.Folder(path))
 
-    fun openCategory(c: BrowseCategory) =
-        if (c == BrowseCategory.DOWNLOADS) openFolder("$root/Download") else navigate(Screen.Cat(c))
+    fun openCategory(c: BrowseCategory) = when (c) {
+        BrowseCategory.DOWNLOADS -> openFolder("$root/Download")
+        BrowseCategory.AUDIO -> navigate(Screen.Music)
+        else -> navigate(Screen.Cat(c))
+    }
 
     private fun onScreenChanged() {
         selection = emptySet()
@@ -299,7 +303,7 @@ class BrowseViewModel(app: Application) : AndroidViewModel(app) {
         is Screen.Folder -> "FOLDER"
         is Screen.Cat -> s.cat.name
         Screen.Search -> "SEARCH"
-        Screen.Home -> ""
+        Screen.Home, Screen.Music -> ""
     }
 
     fun toggleGrid() {
@@ -329,6 +333,7 @@ class BrowseViewModel(app: Application) : AndroidViewModel(app) {
             loadHome()
             return
         }
+        if (s is Screen.Music) return
         loading = true
         loadJob = viewModelScope.launch {
             val list = withContext(Dispatchers.IO) {
@@ -336,7 +341,7 @@ class BrowseViewModel(app: Application) : AndroidViewModel(app) {
                     is Screen.Folder -> File(s.path).listFiles().orEmpty().mapNotNull { entryOf(it) }
                     is Screen.Cat -> MediaQueries.category(ctx, s.cat)
                     Screen.Search -> searchResults()
-                    Screen.Home -> emptyList()
+                    Screen.Home, Screen.Music -> emptyList()
                 }.filter { showHidden || !it.hidden }
             }
             if (s == screen) {
@@ -424,6 +429,15 @@ class BrowseViewModel(app: Application) : AndroidViewModel(app) {
         if (screen == Screen.Search) rememberSearch()
         when {
             e.isDir -> openFolder(e.path)
+            e.kind == FileKind.AUDIO -> {
+                val songs = entries.filter { it.kind == FileKind.AUDIO }.map { it.path }
+                Music.playFiles(ctx, songs, songs.indexOf(e.path).coerceAtLeast(0))
+                Music.showNowPlaying = true
+            }
+            e.kind == FileKind.VIDEO -> {
+                val vids = entries.filter { it.kind == FileKind.VIDEO }.map { it.path }
+                Playback.playVideo(vids, vids.indexOf(e.path).coerceAtLeast(0))
+            }
             e.isViewable -> {
                 val list = entries.filter { it.isViewable }
                 viewerStart = list.indexOfFirst { it.path == e.path }.coerceAtLeast(0)

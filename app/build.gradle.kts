@@ -12,8 +12,8 @@ android {
         applicationId = "com.limpio.app"
         minSdk = 26
         targetSdk = 35
-        versionCode = 10
-        versionName = "6.2"
+        versionCode = 11
+        versionName = "7.0"
     }
 
     // En GitHub Actions se usa una llave fija (guardada en la caché privada del repo),
@@ -68,6 +68,11 @@ dependencies {
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.10.2")
     implementation("io.coil-kt.coil3:coil-compose:3.1.0")
     implementation("io.coil-kt.coil3:coil-video:3.1.0")
+    implementation("io.coil-kt.coil3:coil-gif:3.1.0")
+    implementation("androidx.media3:media3-exoplayer:1.6.1")
+    implementation("androidx.media3:media3-session:1.6.1")
+    implementation("androidx.media3:media3-ui:1.6.1")
+    implementation("com.google.guava:guava:33.3.1-android")
     implementation("androidx.exifinterface:exifinterface:1.4.1")
     testImplementation("junit:junit:4.13.2")
 }

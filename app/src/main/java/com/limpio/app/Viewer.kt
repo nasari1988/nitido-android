@@ -5,6 +5,23 @@ import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.lazy.LazyRow
+import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.filled.RotateRight
+import androidx.compose.material.icons.filled.Slideshow
+import androidx.compose.material.icons.filled.Wallpaper
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.rememberCoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.gestures.calculatePan
@@ -70,6 +87,19 @@ fun MediaViewer(vm: BrowseViewModel) {
     val pager = rememberPagerState(initialPage = vm.viewerStart) { vm.viewer?.size ?: 0 }
     var chrome by remember { mutableStateOf(true) }
     var confirmDelete by remember { mutableStateOf(false) }
+    var slideshow by remember { mutableStateOf(false) }
+    var refresh by remember { mutableStateOf(0) }
+    val scope = rememberCoroutineScope()
+    val strip = rememberLazyListState()
+    LaunchedEffect(pager.currentPage) { strip.animateScrollToItem((pager.currentPage - 3).coerceAtLeast(0)) }
+    LaunchedEffect(slideshow) {
+        while (slideshow) {
+            delay(3500)
+            val n = vm.viewer?.size ?: 0
+            if (n == 0) break
+            pager.animateScrollToPage((pager.currentPage + 1) % n)
+        }
+    }
     val current = list.getOrNull(pager.currentPage.coerceAtMost(list.lastIndex))
 
     Box(Modifier.fillMaxSize().background(Color.Black)) {
@@ -79,11 +109,11 @@ fun MediaViewer(vm: BrowseViewModel) {
             modifier = Modifier.fillMaxSize()
         ) { page ->
             val e = list.getOrNull(page) ?: return@HorizontalPager
-            if (e.kind == FileKind.VIDEO) VideoPage(e) { chrome = !chrome }
-            else ZoomableImage(e.path) { chrome = !chrome }
+            if (e.kind == FileKind.VIDEO) VideoPage(e, list) { chrome = !chrome; slideshow = false }
+            else ZoomableImage(e.path, refresh) { chrome = !chrome; slideshow = false }
         }
 
-        AnimatedVisibility(chrome, enter = fadeIn(), exit = fadeOut(), modifier = Modifier.align(Alignment.TopCenter)) {
+        AnimatedVisibility(chrome && !slideshow, enter = fadeIn(), exit = fadeOut(), modifier = Modifier.align(Alignment.TopCenter)) {
             Row(
                 Modifier.fillMaxWidth().background(Color(0x99000000)).statusBarsPadding().padding(4.dp),
                 verticalAlignment = Alignment.CenterVertically
@@ -100,6 +130,10 @@ fun MediaViewer(vm: BrowseViewModel) {
                     )
                 }
                 current?.let { e ->
+                    IconButton(onClick = { FileOps.openWith(ctx, e.path) }) {
+                        Icon(Icons.AutoMirrored.Filled.OpenInNew, "Abrir con", tint = Color.White)
+                    }
+                    IconButton(onClick = { vm.showDetails(e) }) { Icon(Icons.Filled.Info, "Detalles", tint = Color.White) }
                     IconButton(onClick = { vm.toggleFavorite(e.path) }) {
                         Icon(
                             if (e.path in vm.favorites) Icons.Filled.Star else Icons.Filled.StarBorder, "Favorito",
@@ -110,18 +144,50 @@ fun MediaViewer(vm: BrowseViewModel) {
             }
         }
 
-        AnimatedVisibility(chrome, enter = fadeIn(), exit = fadeOut(), modifier = Modifier.align(Alignment.BottomCenter)) {
-            Row(
-                Modifier.fillMaxWidth().background(Color(0x99000000)).navigationBarsPadding().padding(vertical = 6.dp),
-                horizontalArrangement = androidx.compose.foundation.layout.Arrangement.SpaceEvenly
-            ) {
-                current?.let { e ->
-                    ViewerAction(Icons.Filled.Share, "Compartir") { FileOps.share(ctx, listOf(e.path)) }
-                    ViewerAction(Icons.AutoMirrored.Filled.OpenInNew, "Abrir con") { FileOps.openWith(ctx, e.path) }
-                    ViewerAction(Icons.Filled.Info, "Detalles") { vm.showDetails(e) }
-                    ViewerAction(Icons.Filled.Delete, "Eliminar") { confirmDelete = true }
+        AnimatedVisibility(chrome && !slideshow, enter = fadeIn(), exit = fadeOut(), modifier = Modifier.align(Alignment.BottomCenter)) {
+            Column(Modifier.fillMaxWidth().background(Color(0x99000000)).navigationBarsPadding().padding(vertical = 6.dp)) {
+                if (list.size > 1) {
+                    LazyRow(
+                        state = strip,
+                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                        contentPadding = PaddingValues(horizontal = 12.dp),
+                        modifier = Modifier.fillMaxWidth().padding(bottom = 6.dp)
+                    ) {
+                        itemsIndexed(list, key = { _, it -> it.path }) { i, it ->
+                            val sel = i == pager.currentPage
+                            Box(
+                                Modifier.size(if (sel) 52.dp else 44.dp).clip(RoundedCornerShape(10.dp))
+                                    .then(if (sel) Modifier.border(2.dp, Color.White, RoundedCornerShape(10.dp)) else Modifier)
+                                    .clickable { scope.launch { pager.animateScrollToPage(i) } }
+                            ) { FileThumb(it.path, false, modifier = Modifier.fillMaxSize()) }
+                        }
+                    }
+                }
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly) {
+                    current?.let { e ->
+                        ViewerAction(Icons.Filled.Share, "Compartir") { FileOps.share(ctx, listOf(e.path)) }
+                        if (e.kind == FileKind.IMAGE) {
+                            ViewerAction(Icons.Filled.RotateRight, "Girar") {
+                                scope.launch {
+                                    val ok = withContext(Dispatchers.IO) { ImageEdit.rotate(e.path) }
+                                    if (ok) { FileOps.rescan(ctx, listOf(e.path)); refresh++ }
+                                }
+                            }
+                            ViewerAction(Icons.Filled.Wallpaper, "Fondo") { ImageEdit.setAs(ctx, e.path) }
+                        }
+                        ViewerAction(Icons.Filled.Slideshow, "Presentación") { slideshow = true }
+                        ViewerAction(Icons.Filled.Delete, "Eliminar") { confirmDelete = true }
+                    }
                 }
             }
+        }
+        if (slideshow) {
+            Text(
+                "Presentación · toca para detener",
+                color = Color.White, style = MaterialTheme.typography.labelMedium,
+                modifier = Modifier.align(Alignment.BottomCenter).navigationBarsPadding().padding(16.dp)
+                    .clip(RoundedCornerShape(12.dp)).background(Color(0x66000000)).padding(horizontal = 12.dp, vertical = 6.dp)
+            )
         }
     }
 
@@ -147,7 +213,7 @@ private fun ViewerAction(icon: androidx.compose.ui.graphics.vector.ImageVector, 
 }
 
 @Composable
-private fun ZoomableImage(path: String, onTap: () -> Unit) {
+private fun ZoomableImage(path: String, refresh: Int, onTap: () -> Unit) {
     val ctx = LocalContext.current
     var scale by remember(path) { mutableFloatStateOf(1f) }
     var offset by remember(path) { mutableStateOf(Offset.Zero) }
@@ -183,7 +249,7 @@ private fun ZoomableImage(path: String, onTap: () -> Unit) {
             }
     ) {
         AsyncImage(
-            model = ImageRequest.Builder(ctx).data(File(path)).size(2560).build(),
+            model = ImageRequest.Builder(ctx).data(File(path)).size(2560).memoryCacheKey("$path#$refresh#${File(path).lastModified()}").build(),
             contentDescription = null,
             contentScale = ContentScale.Fit,
             modifier = Modifier.fillMaxSize().graphicsLayer {
@@ -195,7 +261,7 @@ private fun ZoomableImage(path: String, onTap: () -> Unit) {
 }
 
 @Composable
-private fun VideoPage(e: Entry, onTap: () -> Unit) {
+private fun VideoPage(e: Entry, all: List<Entry>, onTap: () -> Unit) {
     val ctx = LocalContext.current
     Box(
         Modifier.fillMaxSize().pointerInput(e.path) { detectTapGestures(onTap = { onTap() }) },
@@ -206,7 +272,10 @@ private fun VideoPage(e: Entry, onTap: () -> Unit) {
             contentScale = ContentScale.Fit, modifier = Modifier.fillMaxSize()
         )
         IconButton(
-            onClick = { FileOps.open(ctx, e.path) },
+            onClick = {
+                val vids = all.filter { it.kind == FileKind.VIDEO }.map { it.path }
+                Playback.playVideo(vids, vids.indexOf(e.path).coerceAtLeast(0))
+            },
             modifier = Modifier.size(76.dp).clip(CircleShape).background(Color(0x99000000))
         ) {
             Icon(Icons.Filled.PlayArrow, "Reproducir", tint = Color.White, modifier = Modifier.size(48.dp))
