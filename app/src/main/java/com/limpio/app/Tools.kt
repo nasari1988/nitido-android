@@ -60,7 +60,7 @@ private val TOOLS = listOf(
     Tool("space", "Análisis de espacio", "Qué ocupa más", Icons.Filled.PieChart, 0xFFD6363B, true),
     Tool("apps", "Apps instaladas", "Tamaño y sin usar", Icons.Filled.Apps, 0xFF0B7A5F, true),
     Tool("safe", "Carpeta segura", "Cifrada, con huella", Icons.Filled.Lock, 0xFF4E5D6C, true),
-    Tool("pc", "Transferir a PC", "Por Wi‑Fi, sin cables", Icons.Filled.Computer, 0xFF2E8B3E, false),
+    Tool("pc", "Transferir a PC", "Por Wi‑Fi, sin cables", Icons.Filled.Computer, 0xFF2E8B3E, true),
     Tool("drive", "Google Drive", "Subir y compartir enlaces", Icons.Filled.Cloud, 0xFF1A73E8, false),
 )
 
@@ -81,6 +81,7 @@ fun ToolsTab(
     when (tool) {
         "space" -> SpaceScreen(space, onExit = { onTool(null) }, onOpenFolder = { onExplore(it) })
         "apps" -> AppsScreen(apps, onExit = { onTool(null) })
+        "pc" -> TransferScreen(onExit = { onTool(null) })
         "safe" -> VaultScreen(browse, onExit = { onTool(null) }, onGoExplore = { onExplore(null) })
         "test" -> SelfTestScreen(selfTest, onExit = { onTool(null) })
         "dup" -> DupTab(dups, onExit = { onTool(null) })

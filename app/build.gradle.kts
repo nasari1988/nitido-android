@@ -12,8 +12,8 @@ android {
         applicationId = "com.limpio.app"
         minSdk = 26
         targetSdk = 35
-        versionCode = 12
-        versionName = "8.0"
+        versionCode = 13
+        versionName = "9.0"
     }
 
     // En GitHub Actions se usa una llave fija (guardada en la caché privada del repo),
@@ -74,6 +74,7 @@ dependencies {
     implementation("androidx.media3:media3-ui:1.6.1")
     implementation("com.google.guava:guava:33.3.1-android")
     implementation("androidx.biometric:biometric:1.1.0")
+    implementation("org.nanohttpd:nanohttpd:2.3.1")
     implementation("androidx.exifinterface:exifinterface:1.4.1")
     testImplementation("junit:junit:4.13.2")
 }

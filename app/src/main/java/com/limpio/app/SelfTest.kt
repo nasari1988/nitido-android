@@ -91,7 +91,7 @@ class SelfTestViewModel(app: Application) : AndroidViewModel(app) {
 
     private val ctx: Context get() = getApplication()
     private val sandbox = File(Protection.rootPath, "Download/ArchivosAutoprueba")
-    val total = 25
+    val total = 27
 
     fun run() {
         if (running) return
@@ -373,6 +373,24 @@ class SelfTestViewModel(app: Application) : AndroidViewModel(app) {
                 !usage -> TestStatus.WARN to "${list.size} apps leídas; falta \"Acceso a datos de uso\" para tamaño real y último uso"
                 else -> ok("${list.size} apps leídas con tamaño real y último uso")
             }
+        }
+
+        test("Transferir a PC (servidor de prueba)") {
+            val root = File(sandbox, "pc").apply { mkdirs() }
+            val port = java.net.ServerSocket(0).use { it.localPort }
+            var ro = false
+            val code = TransferServer.newCode()
+            val server = TransferServer("127.0.0.1", port, root, code, readOnly = { ro })
+            server.start(5000, true)
+            try {
+                val fails = TransferSelfCheck.run(port, code, root) { ro = it }
+                check(fails.isEmpty(), "Entrar con código, navegar, descargar, video por partes, subir, ZIP y solo lectura", fails.joinToString("; "))
+            } finally { server.stop() }
+        }
+
+        test("Red Wi‑Fi para transferir") {
+            val ip = Net.localIp()
+            if (ip != null) ok("Dirección en tu red: $ip") else TestStatus.WARN to "No estás en Wi‑Fi: Transferir a PC no funcionará hasta conectarte"
         }
 
         test("Fondo de pantalla para el vidrio") {
