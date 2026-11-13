@@ -186,29 +186,60 @@ object MiaController {
     fun hasMic(ctx: Context) =
         ContextCompat.checkSelfPermission(ctx, Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED
 
+    private val main = android.os.Handler(android.os.Looper.getMainLooper())
+
+    /** Prefiere el reconocedor de Google si está instalado (los de algunas marcas fallan en español). */
+    private fun createRecognizer(): SpeechRecognizer {
+        val google = android.content.ComponentName(
+            "com.google.android.googlequicksearchbox",
+            "com.google.android.voicesearch.serviceapi.GoogleRecognitionService"
+        )
+        val services = app.packageManager.queryIntentServices(Intent(android.speech.RecognitionService.SERVICE_INTERFACE), 0)
+        val hasGoogle = services.any { it.serviceInfo.packageName == google.packageName && it.serviceInfo.name == google.className }
+        return if (hasGoogle) SpeechRecognizer.createSpeechRecognizer(app, google) else SpeechRecognizer.createSpeechRecognizer(app)
+    }
+
+    private fun resumeWakeLater() {
+        if (!Store.settings.wakeWord) return
+        main.removeCallbacks(resumeWake)
+        main.postDelayed(resumeWake, 1500)
+    }
+
+    private val resumeWake = Runnable { if (!listening && Store.settings.wakeWord) WakeWordService.resume(app) }
+
     fun startListening(activity: Activity?) {
         if (!hasMic(app)) {
             pose = Pose.DUDOSA; message = "Necesito permiso del micrófono para escucharte."; return
         }
         if (!SpeechRecognizer.isRecognitionAvailable(app)) {
-            pose = Pose.TRISTE; message = "Este teléfono no tiene reconocimiento de voz instalado."; return
+            pose = Pose.TRISTE; message = "Este teléfono no tiene reconocimiento de voz. Instala o actualiza la app de Google."; return
         }
         stopSpeaking()
-        recognizer?.destroy()
-        val rec = SpeechRecognizer.createSpeechRecognizer(app)
-        recognizer = rec
+        main.removeCallbacks(resumeWake)
         partial = ""
         listening = true
         pose = Pose.NORMAL
         trigger = "Escuchando…"
         message = "Te escucho…"
         lastChat = System.currentTimeMillis()
+        // «Oye Mia» suelta el micrófono antes de que empiece el reconocimiento normal.
+        if (Store.settings.wakeWord) {
+            WakeWordService.pause(app)
+            main.postDelayed({ beginRecognition(activity, attempt = 0, withLanguage = true) }, 600)
+        } else beginRecognition(activity, attempt = 0, withLanguage = true)
+    }
+
+    private fun beginRecognition(activity: Activity?, attempt: Int, withLanguage: Boolean) {
+        if (!listening) return
+        try { recognizer?.destroy() } catch (_: Exception) { }
+        val rec = try { createRecognizer() } catch (e: Exception) { SpeechRecognizer.createSpeechRecognizer(app) }
+        recognizer = rec
         rec.setRecognitionListener(object : RecognitionListener {
-            override fun onReadyForSpeech(params: Bundle?) {}
+            override fun onReadyForSpeech(params: Bundle?) { message = "Te escucho…" }
             override fun onBeginningOfSpeech() {}
             override fun onRmsChanged(rmsdB: Float) {}
             override fun onBufferReceived(buffer: ByteArray?) {}
-            override fun onEndOfSpeech() {}
+            override fun onEndOfSpeech() { message = "Déjame ver…" }
             override fun onEvent(eventType: Int, params: Bundle?) {}
             override fun onPartialResults(partialResults: Bundle?) {
                 partialResults?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)?.firstOrNull()?.let { partial = it }
@@ -219,28 +250,47 @@ object MiaController {
                 partial = text
                 if (text.isBlank()) { pose = Pose.DUDOSA; message = "No te escuché bien… ¿me lo repites?" }
                 else handleInput(text, activity)
+                resumeWakeLater()
             }
             override fun onError(error: Int) {
+                val retriable = error == SpeechRecognizer.ERROR_RECOGNIZER_BUSY || error == SpeechRecognizer.ERROR_CLIENT ||
+                    error == SpeechRecognizer.ERROR_AUDIO || error == 11 /* servidor desconectado */
+                val language = error == 12 || error == 13 /* idioma no disponible */
+                if ((retriable || language) && attempt < 2 && listening) {
+                    try { rec.cancel(); rec.destroy() } catch (_: Exception) { }
+                    recognizer = null
+                    main.postDelayed({ beginRecognition(activity, attempt + 1, withLanguage && !language) }, 700)
+                    return
+                }
                 listening = false
                 pose = Pose.DUDOSA
                 message = when (error) {
                     SpeechRecognizer.ERROR_NO_MATCH, SpeechRecognizer.ERROR_SPEECH_TIMEOUT -> "No te escuché bien… ¿me lo repites?"
                     SpeechRecognizer.ERROR_NETWORK, SpeechRecognizer.ERROR_NETWORK_TIMEOUT -> "Sin internet no te entiendo bien. Intenta de nuevo."
                     SpeechRecognizer.ERROR_INSUFFICIENT_PERMISSIONS -> "Necesito permiso del micrófono."
-                    else -> "Algo pasó con el micrófono. Intenta otra vez."
+                    SpeechRecognizer.ERROR_RECOGNIZER_BUSY, SpeechRecognizer.ERROR_AUDIO ->
+                        "Otra app está usando el micrófono. Ciérrala e intenta de nuevo. (código $error)"
+                    12, 13 -> "Tu teléfono no tiene el español para voz. Descárgalo en Ajustes › Idioma › Voz. (código $error)"
+                    else -> "Algo pasó con el micrófono. Intenta otra vez. (código $error)"
                 }
+                resumeWakeLater()
             }
         })
         val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH)
             .putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
-            .putExtra(RecognizerIntent.EXTRA_LANGUAGE, "es-MX")
             .putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, true)
             .putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 1)
-        rec.startListening(intent)
+            .putExtra(RecognizerIntent.EXTRA_CALLING_PACKAGE, app.packageName)
+        if (withLanguage) intent.putExtra(RecognizerIntent.EXTRA_LANGUAGE, "es-MX")
+            .putExtra(RecognizerIntent.EXTRA_LANGUAGE_PREFERENCE, "es-MX")
+        try { rec.startListening(intent) } catch (e: Exception) {
+            listening = false; pose = Pose.DUDOSA; message = "No pude abrir el micrófono. Intenta otra vez."; resumeWakeLater()
+        }
     }
 
     fun stopListening() {
-        recognizer?.stopListening()
+        try { recognizer?.cancel() } catch (_: Exception) { }
         listening = false
+        resumeWakeLater()
     }
 }

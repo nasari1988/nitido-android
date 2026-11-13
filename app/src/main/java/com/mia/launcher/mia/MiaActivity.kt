@@ -99,7 +99,7 @@ class MiaActivity : ComponentActivity() {
         }
         val km = getSystemService(KeyguardManager::class.java)
         Box(
-            Modifier.fillMaxSize().background(Color(0x99100E26))
+            Modifier.fillMaxSize().background(Color(0xEB100E26))
                 .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null) { finish() }
         ) {
             Text(
