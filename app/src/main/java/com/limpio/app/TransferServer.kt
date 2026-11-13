@@ -95,13 +95,30 @@ class TransferServer(
     /** Sin compresión: en la red local no ahorra nada y rompe las respuestas por partes (video). */
     override fun useGzipWhenAccepted(r: Response): Boolean = false
 
+    /** Si ya se leyó el cuerpo de la petición actual (cada conexión atiende una petición a la vez). */
+    private val bodyRead = ThreadLocal<Boolean>()
+
+    /** Lee el cuerpo una sola vez (formularios y archivos subidos). */
+    private fun parse(s: IHTTPSession, files: MutableMap<String, String> = HashMap()) {
+        if (bodyRead.get() == true) return
+        bodyRead.set(true)
+        s.parseBody(files)
+    }
+
     override fun serve(session: IHTTPSession): Response {
         lastActivity = System.currentTimeMillis()
-        return try {
+        bodyRead.set(false)
+        val resp = try {
             route(session)
         } catch (e: Exception) {
             newFixedLengthResponse(Response.Status.INTERNAL_ERROR, MIME_PLAINTEXT, "Error: ${e.message}")
         }
+        // Si se rechazó una petición sin leer lo que traía (p. ej. una subida en modo solo lectura),
+        // se termina de leer: si no, esos datos se confundirían con la siguiente petición de la misma conexión.
+        if (session.method == Method.POST || session.method == Method.PUT) {
+            try { parse(session) } catch (_: Exception) {}
+        }
+        return resp
     }
 
     private fun authed(s: IHTTPSession) = s.cookies.read("arch_t")?.let { it in tokens } == true
@@ -135,7 +152,7 @@ class TransferServer(
     private fun redirect(to: String) = newFixedLengthResponse(SEE_OTHER, MIME_PLAINTEXT, "").apply { addHeader("Location", to) }
 
     private fun login(s: IHTTPSession): Response {
-        s.parseBody(HashMap())
+        parse(s)
         val now = System.currentTimeMillis()
         if (now < blockedUntil) return html(loginPage("Demasiados intentos. Espera un minuto."))
         if (param(s, "code")?.trim() != code) {
@@ -216,7 +233,7 @@ class TransferServer(
         val dir = resolve(param(s, "p")) ?: return forbidden("Ruta no permitida")
         if (!dir.isDirectory) return notFound()
         val files = HashMap<String, String>()
-        s.parseBody(files)
+        parse(s, files)
         val names = s.parameters["f"].orEmpty()
         val keys = files.keys.filter { it == "f" || (it.startsWith("f") && it.drop(1).toIntOrNull() != null) }
             .sortedBy { if (it == "f") 1 else it.drop(1).toInt() }
@@ -237,7 +254,7 @@ class TransferServer(
 
     private fun mkdir(s: IHTTPSession): Response {
         if (readOnly()) return forbidden("Modo solo lectura")
-        s.parseBody(HashMap())
+        parse(s)
         val dir = resolve(param(s, "p")) ?: return forbidden("Ruta no permitida")
         val name = param(s, "name")?.trim()?.replace("/", "")?.replace("\\", "").orEmpty()
         if (name.isNotEmpty() && name != "." && name != "..") File(dir, name).mkdirs()
@@ -246,7 +263,7 @@ class TransferServer(
 
     private fun delete(s: IHTTPSession): Response {
         if (readOnly()) return forbidden("Modo solo lectura")
-        s.parseBody(HashMap())
+        parse(s)
         val f = resolve(param(s, "p")) ?: return forbidden("Ruta no permitida")
         if (f.canonicalPath == rootPath || isProtected(f.absolutePath)) return forbidden("Carpeta del sistema: no se puede borrar")
         val parent = f.parentFile ?: root

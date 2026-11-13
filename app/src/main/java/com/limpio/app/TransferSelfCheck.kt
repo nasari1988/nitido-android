@@ -84,6 +84,8 @@ object TransferSelfCheck {
         val (body2, ct2) = multipart("bloqueado.txt", up)
         if (call("$base/up?ajax=1&p=", "POST", cookie, body2, ct2).code != 403 || File(root, "bloqueado.txt").exists()) fails += "subió en modo solo lectura"
         setReadOnly(false)
+        // Justo después del rechazo, por la misma conexión: debe responder normal.
+        if (call("$base/b", cookie = cookie).code != 200) fails += "la conexión quedó dañada tras un rechazo"
 
         val zip = call("$base/zip?p=", cookie = cookie)
         val names = try {
