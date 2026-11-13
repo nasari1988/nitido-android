@@ -8,7 +8,7 @@ import android.os.Build
 import android.os.Bundle
 import android.os.Environment
 import android.provider.Settings
-import androidx.activity.ComponentActivity
+import androidx.fragment.app.FragmentActivity
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
@@ -63,7 +63,7 @@ import coil3.gif.AnimatedImageDecoder
 import coil3.gif.GifDecoder
 import androidx.compose.runtime.LaunchedEffect
 
-class MainActivity : ComponentActivity() {
+class MainActivity : FragmentActivity() {
 
     private val cleaner: MainViewModel by viewModels()
     private val organizer: OrganizerViewModel by viewModels()
@@ -71,6 +71,8 @@ class MainActivity : ComponentActivity() {
     private val dups: DupViewModel by viewModels()
     private val selfTest: SelfTestViewModel by viewModels()
     private val music: MusicViewModel by viewModels()
+    private val space: SpaceViewModel by viewModels()
+    private val apps: AppsViewModel by viewModels()
     private var hasPermission by mutableStateOf(false)
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -90,15 +92,22 @@ class MainActivity : ComponentActivity() {
             ArchivosTheme {
                 Box(Modifier.fillMaxSize()) {
                     GlassBackground()
-                    if (hasPermission) ArchivosApp(browse, cleaner, dups, organizer, selfTest, music)
+                    if (hasPermission) ArchivosApp(browse, cleaner, dups, organizer, selfTest, music, space, apps)
                     else PermissionScreen()
                 }
             }
         }
     }
 
+    override fun onStop() {
+        super.onStop()
+        // La carpeta segura se bloquea al salir de la app.
+        if (!isChangingConfigurations) Vault.lock()
+    }
+
     override fun onResume() {
         super.onResume()
+        apps.refreshIfLoaded()
         hasPermission = checkPermission()
         cleaner.refreshStorage()
         if (!hasPermission) return
@@ -178,6 +187,8 @@ fun ArchivosApp(
     organizer: OrganizerViewModel,
     selfTest: SelfTestViewModel,
     music: MusicViewModel,
+    space: SpaceViewModel,
+    apps: AppsViewModel,
 ) {
     val ctx = LocalContext.current
     LaunchedEffect(Unit) { Music.connect(ctx) }
@@ -210,6 +221,11 @@ fun ArchivosApp(
                     0 -> BrowseTab(
                         browse,
                         music,
+                        onMoveToVault = { paths ->
+                            Vault.pendingImport = paths
+                            tool = "safe"
+                            tab = 2
+                        },
                         cleanable = cleaner.result?.let { cleaner.quickCleanItems().sumOf { it.size } },
                         onClean = { tab = 1 },
                     )
@@ -220,9 +236,16 @@ fun ArchivosApp(
                         dups = dups,
                         organizer = organizer,
                         selfTest = selfTest,
+                        space = space,
+                        apps = apps,
+                        browse = browse,
                         onLargeFiles = {
                             cleaner.openWhenReady(Category.LARGE)
                             tab = 1
+                        },
+                        onExplore = { folder ->
+                            tab = 0
+                            if (folder != null) browse.openFolder(folder)
                         },
                     )
                 }

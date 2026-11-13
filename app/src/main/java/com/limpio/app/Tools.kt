@@ -57,9 +57,9 @@ private val TOOLS = listOf(
     Tool("dup", "Duplicados", "Idénticos y parecidos", Icons.Filled.ContentCopy, 0xFF1E6FD9, true),
     Tool("org", "Organizar", "Cada archivo a su carpeta", Icons.Filled.AutoAwesome, 0xFF7B3FBF, true),
     Tool("large", "Archivos grandes", "Más de 100 MB", Icons.Filled.SdStorage, 0xFFC2610C, true),
-    Tool("space", "Análisis de espacio", "Qué ocupa más", Icons.Filled.PieChart, 0xFFD6363B, false),
-    Tool("apps", "Apps instaladas", "Tamaño y sin usar", Icons.Filled.Apps, 0xFF0B7A5F, false),
-    Tool("safe", "Carpeta segura", "Cifrada, con huella", Icons.Filled.Lock, 0xFF4E5D6C, false),
+    Tool("space", "Análisis de espacio", "Qué ocupa más", Icons.Filled.PieChart, 0xFFD6363B, true),
+    Tool("apps", "Apps instaladas", "Tamaño y sin usar", Icons.Filled.Apps, 0xFF0B7A5F, true),
+    Tool("safe", "Carpeta segura", "Cifrada, con huella", Icons.Filled.Lock, 0xFF4E5D6C, true),
     Tool("pc", "Transferir a PC", "Por Wi‑Fi, sin cables", Icons.Filled.Computer, 0xFF2E8B3E, false),
     Tool("drive", "Google Drive", "Subir y compartir enlaces", Icons.Filled.Cloud, 0xFF1A73E8, false),
 )
@@ -72,9 +72,16 @@ fun ToolsTab(
     dups: DupViewModel,
     organizer: OrganizerViewModel,
     selfTest: SelfTestViewModel,
+    space: SpaceViewModel,
+    apps: AppsViewModel,
+    browse: BrowseViewModel,
     onLargeFiles: () -> Unit,
+    onExplore: (String?) -> Unit,
 ) {
     when (tool) {
+        "space" -> SpaceScreen(space, onExit = { onTool(null) }, onOpenFolder = { onExplore(it) })
+        "apps" -> AppsScreen(apps, onExit = { onTool(null) })
+        "safe" -> VaultScreen(browse, onExit = { onTool(null) }, onGoExplore = { onExplore(null) })
         "test" -> SelfTestScreen(selfTest, onExit = { onTool(null) })
         "dup" -> DupTab(dups, onExit = { onTool(null) })
         "org" -> OrganizerTab(organizer, onExit = { onTool(null) })

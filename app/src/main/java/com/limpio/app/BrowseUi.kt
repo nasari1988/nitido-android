@@ -136,7 +136,13 @@ fun browseIcon(c: BrowseCategory): ImageVector = when (c) {
 }
 
 @Composable
-fun BrowseTab(vm: BrowseViewModel, music: MusicViewModel, cleanable: Long? = null, onClean: () -> Unit) {
+fun BrowseTab(
+    vm: BrowseViewModel,
+    music: MusicViewModel,
+    onMoveToVault: (List<String>) -> Unit = {},
+    cleanable: Long? = null,
+    onClean: () -> Unit,
+) {
     val snackbar = remember { SnackbarHostState() }
     LaunchedEffect(vm.message) { vm.message?.let { snackbar.showSnackbar(it); vm.message = null } }
     LaunchedEffect(Unit) { vm.load() }
@@ -147,7 +153,7 @@ fun BrowseTab(vm: BrowseViewModel, music: MusicViewModel, cleanable: Long? = nul
         when (vm.screen) {
             Screen.Home -> HomeScreen(vm, cleanable, onClean)
             Screen.Music -> MusicLibraryScreen(music, onBack = { vm.back() })
-            else -> ListScreen(vm, snackbar)
+            else -> ListScreen(vm, snackbar, onMoveToVault)
         }
         if (vm.screen == Screen.Home) {
             SnackbarHost(snackbar, Modifier.align(Alignment.BottomCenter))
@@ -407,7 +413,7 @@ private fun HomeScreen(vm: BrowseViewModel, cleanable: Long?, onClean: () -> Uni
 
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalFoundationApi::class)
 @Composable
-private fun ListScreen(vm: BrowseViewModel, snackbar: SnackbarHostState) {
+private fun ListScreen(vm: BrowseViewModel, snackbar: SnackbarHostState, onMoveToVault: (List<String>) -> Unit) {
     val ctx = LocalContext.current
     val s = vm.screen
     val selecting = vm.selection.isNotEmpty()
@@ -454,6 +460,14 @@ private fun ListScreen(vm: BrowseViewModel, snackbar: SnackbarHostState) {
                                     MenuItem("Copiar ruta", Icons.Filled.Link) { selMenu = false; vm.clearSelection(); FileOps.copyPath(ctx, single.path) }
                                 }
                                 MenuItem("Comprimir en ZIP", Icons.Filled.Archive) { selMenu = false; vm.compress() }
+                                if (sel.none { it.isDir }) {
+                                    MenuItem("Mover a carpeta segura", Icons.Filled.Lock) {
+                                        selMenu = false
+                                        val paths = vm.selection.toList()
+                                        vm.clearSelection()
+                                        onMoveToVault(paths)
+                                    }
+                                }
                                 MenuItem("Seleccionar todo", Icons.Filled.SelectAll) { selMenu = false; vm.selectAll() }
                             }
                         }

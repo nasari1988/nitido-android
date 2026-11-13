@@ -91,7 +91,7 @@ class SelfTestViewModel(app: Application) : AndroidViewModel(app) {
 
     private val ctx: Context get() = getApplication()
     private val sandbox = File(Protection.rootPath, "Download/ArchivosAutoprueba")
-    val total = 20
+    val total = 25
 
     fun run() {
         if (running) return
@@ -321,6 +321,58 @@ class SelfTestViewModel(app: Application) : AndroidViewModel(app) {
             val sub = MediaUtil.findSubtitle(vid)
             val cfg = videoItem(vid.absolutePath).localConfiguration?.subtitleConfigurations.orEmpty()
             check(sub?.name == "pelicula.srt" && cfg.size == 1, "Encontró pelicula.srt y lo agregó al video", "No los encontró")
+        }
+
+        test("Cifrado de la carpeta segura") {
+            val key = VaultCrypto.newKey()
+            val data = Random(11).nextBytes(3 * VaultCrypto.CHUNK + 1234)
+            val enc = VaultCrypto.encryptBytes(key, data)
+            val back = VaultCrypto.decryptBytes(key, enc)
+            val tampered = enc.copyOf().also { it[it.size / 2] = (it[it.size / 2] + 1).toByte() }
+            val detected = try { VaultCrypto.decryptBytes(key, tampered); false } catch (e: Exception) { true }
+            check(back.contentEquals(data) && detected, "3 MB cifrados y descifrados; detecta alteraciones", "Falló (igual=${back.contentEquals(data)}, detecta=$detected)")
+        }
+
+        test("Llave en el chip de seguridad") {
+            when {
+                !Vault.deviceSecure(ctx) -> TestStatus.WARN to "El teléfono no tiene bloqueo de pantalla: la carpeta segura no se puede usar"
+                !Vault.keystoreWorks() -> fail("No se pudo crear una llave protegida")
+                else -> ok("Llave AES‑256 creada y usada dentro del chip (y borrada)")
+            }
+        }
+
+        test("Huella disponible") {
+            if (Vault.fingerprintReady(ctx)) ok("Huella registrada y lista")
+            else TestStatus.WARN to "No hay huella registrada: se pedirá tu PIN"
+        }
+
+        test("Análisis de espacio") {
+            val root = File(sandbox, "espacio").apply { mkdirs() }
+            File(root, "a/b").mkdirs()
+            File(root, "a/x.bin").writeBytes(ByteArray(1000))
+            File(root, "a/b/y.bin").writeBytes(ByteArray(2500))
+            File(root, "z.bin").writeBytes(ByteArray(500))
+            val sizes = SpaceAnalyzer.folderSizes(root)
+            val rects = Treemap.squarify(listOf(3500.0, 500.0), 0f, 0f, 400f, 300f)
+            val areaOk = kotlin.math.abs(rects[0].w * rects[0].h - 105_000f) < 50
+            check(
+                sizes[root.absolutePath] == 4000L && sizes[File(root, "a").absolutePath] == 3500L && areaOk,
+                "Tamaños por carpeta y mapa de bloques correctos",
+                "Tamaños: ${sizes[root.absolutePath]}, mapa ok=$areaOk"
+            )
+        }
+
+        test("Apps instaladas") {
+            val pm = ctx.packageManager
+            @Suppress("DEPRECATION")
+            val list = pm.getInstalledApplications(0)
+            val mine = list.any { it.packageName == ctx.packageName }
+            val usage = AppsViewModel(ctx.applicationContext as Application).hasUsageAccess()
+            when {
+                !mine -> fail("No se pudo leer la lista de apps")
+                !usage -> TestStatus.WARN to "${list.size} apps leídas; falta \"Acceso a datos de uso\" para tamaño real y último uso"
+                else -> ok("${list.size} apps leídas con tamaño real y último uso")
+            }
         }
 
         test("Fondo de pantalla para el vidrio") {
