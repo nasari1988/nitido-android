@@ -35,6 +35,7 @@ jobs:
             limpiar) bash ci/rbvsr_build.sh ;;
             limpiar-npu) bash ci/rbvsr_npu_build.sh ;;
             enfocar-npu) bash ci/nafnet_build.sh ;;
+            dreamlite-prueba) bash ci/dreamlite_try.sh ;;
             *) bash ci/rife_build.sh ;;
           esac
       # Limpiar (prueba): the checked weights for a private test run elsewhere; never published
@@ -67,6 +68,13 @@ jobs:
           GH_REPO: ${{ github.repository }}
         run: |
           ls -la out
+          if [ "${{ inputs.que }}" = "dreamlite-prueba" ]; then
+            # sample photos edited on the server: a test page, not a model
+            T=prueba-dreamlite
+            gh release view "$T" >/dev/null 2>&1 || gh release create "$T" --title "Prueba de DreamLite (fotos de muestra)" --notes "Ediciones de prueba con DreamLite-mobile en el servidor." --prerelease
+            gh release upload "$T" out/* --clobber
+            exit 0
+          fi
           if [ "${{ inputs.que }}" = "enfocar-npu" ]; then
             # NAFNet's NPU files go into the restoration pack; its list gets them (the app offers the update)
             T=modelo-restauracion
