@@ -36,6 +36,7 @@ jobs:
             limpiar-npu) bash ci/rbvsr_npu_build.sh ;;
             enfocar-npu) bash ci/nafnet_build.sh ;;
             dreamlite-prueba) bash ci/dreamlite_try.sh ;;
+            lector-dreamlite) bash ci/qwenvl_build.sh ;;
             *) bash ci/rife_build.sh ;;
           esac
       # Limpiar (prueba): the checked weights for a private test run elsewhere; never published
