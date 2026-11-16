@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
     inputs:
       que:
-        description: "Qué convertir: fluido (RIFE), realismo (PiSA-SR), limpiar-npu (RealBasicVSR) o enfocar-npu (NAFNet al paquete de restauración)"
+        description: "Qué convertir: fluido (RIFE), realismo (PiSA-SR), limpiar-npu (RealBasicVSR), enfocar-npu (NAFNet), pose-npu, pose-npu-896x1152 o pose-npu-1152x896 (ControlNet de pose)"
         default: fluido
 
 jobs:
@@ -37,6 +37,8 @@ jobs:
             enfocar-npu) bash ci/nafnet_build.sh ;;
             dreamlite-prueba) bash ci/dreamlite_try.sh ;;
             lector-dreamlite) bash ci/qwenvl_build.sh ;;
+            pose-npu) bash ci/control_pose_build.sh ;;
+            pose-npu-*) Q="${{ inputs.que }}"; bash ci/control_pose_build.sh "${Q#pose-npu-}" ;;
             *) bash ci/rife_build.sh ;;
           esac
       # Limpiar (prueba): the checked weights for a private test run elsewhere; never published
@@ -87,6 +89,20 @@ jobs:
             gh release upload "$T" files.txt --clobber
             exit 0
           fi
+          case "${{ inputs.que }}" in pose-npu*)
+            # the pose ControlNet: every size in one release; its list keeps the sizes built before
+            T=modelo-control-pose-npu
+            gh release view "$T" >/dev/null 2>&1 || gh release create "$T" --title "$T" --notes "ControlNet de pose (xinsir, Apache-2.0) para Editar › pulir con SDXL. La app lo descarga sola." --latest=false
+            gh release download "$T" -p files.txt -O old_files.txt 2>/dev/null || touch old_files.txt
+            (cd out && ls | grep -v '^files.txt$' | xargs -I{} gh release upload "$T" "{}" --clobber)
+            cp out/files.txt files.txt
+            while read -r name size; do
+              [ -n "$name" ] && ! grep -q "^$name " files.txt && echo "$name $size" >> files.txt
+            done < old_files.txt
+            cat files.txt
+            gh release upload "$T" files.txt --clobber
+            exit 0 ;;
+          esac
           TAG="modelo-${{ inputs.que }}"
           gh release view "$TAG" >/dev/null 2>&1 || gh release create "$TAG" --title "$TAG" --notes "La app lo descarga sola." --latest=false
           gh release upload "$TAG" out/* --clobber
