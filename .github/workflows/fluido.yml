@@ -97,7 +97,7 @@ jobs:
             (cd out && ls | grep -v '^files.txt$' | xargs -I{} gh release upload "$T" "{}" --clobber)
             cp out/files.txt files.txt
             while read -r name size; do
-              [ -n "$name" ] && ! grep -q "^$name " files.txt && echo "$name $size" >> files.txt
+              [ -n "$name" ] && [ "$name" != files.txt ] && ! grep -q "^$name " files.txt && echo "$name $size" >> files.txt
             done < old_files.txt
             cat files.txt
             gh release upload "$T" files.txt --clobber
