@@ -1,4 +1,5 @@
-name: Convertir Más fluido (RIFE)
+name: Convertir para la NPU
+run-name: "Convertir para la NPU: ${{ inputs.que }}"
 
 on:
   workflow_dispatch:
