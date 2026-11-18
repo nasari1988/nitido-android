@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
     inputs:
       que:
-        description: "Qué convertir: fluido (RIFE), realismo (PiSA-SR), limpiar-npu (RealBasicVSR), enfocar-npu (NAFNet), pose-npu, pose-npu-896x1152 o pose-npu-1152x896 (ControlNet de pose)"
+        description: "Qué convertir: fluido (RIFE), realismo (PiSA-SR), limpiar-npu (RealBasicVSR), enfocar-npu (NAFNet), pose-npu[-WxH] (ControlNet de pose) o dreamlite-npu[-WxH] (editor DreamLite)"
         default: fluido
 
 jobs:
@@ -38,6 +38,8 @@ jobs:
             dreamlite-prueba) bash ci/dreamlite_try.sh ;;
             lector-dreamlite) bash ci/qwenvl_build.sh ;;
             pose-npu) bash ci/control_pose_build.sh ;;
+            dreamlite-npu) bash ci/dreamlite_npu_build.sh ;;
+            dreamlite-npu-*) Q="${{ inputs.que }}"; bash ci/dreamlite_npu_build.sh "${Q#dreamlite-npu-}" ;;
             pose-npu-*) Q="${{ inputs.que }}"; bash ci/control_pose_build.sh "${Q#pose-npu-}" ;;
             *) bash ci/rife_build.sh ;;
           esac
@@ -89,10 +91,13 @@ jobs:
             gh release upload "$T" files.txt --clobber
             exit 0
           fi
-          case "${{ inputs.que }}" in pose-npu*)
-            # the pose ControlNet: every size in one release; its list keeps the sizes built before
-            T=modelo-control-pose-npu
-            gh release view "$T" >/dev/null 2>&1 || gh release create "$T" --title "$T" --notes "ControlNet de pose (xinsir, Apache-2.0) para Editar › pulir con SDXL. La app lo descarga sola." --latest=false
+          case "${{ inputs.que }}" in pose-npu*|dreamlite-npu*)
+            # every size in one release; its list keeps the sizes built before
+            case "${{ inputs.que }}" in
+              pose-npu*) T=modelo-control-pose-npu; NOTES="ControlNet de pose (xinsir, Apache-2.0) para Editar › pulir con SDXL. La app lo descarga sola." ;;
+              *) T=modelo-dreamlite-npu; NOTES="DreamLite-mobile (ByteDance, pesos CC BY-NC 4.0: uso no comercial) para Editar › paso 1. La app lo descarga sola." ;;
+            esac
+            gh release view "$T" >/dev/null 2>&1 || gh release create "$T" --title "$T" --notes "$NOTES" --latest=false
             gh release download "$T" -p files.txt -O old_files.txt 2>/dev/null || touch old_files.txt
             (cd out && ls | grep -v '^files.txt$' | xargs -I{} gh release upload "$T" "{}" --clobber)
             cp out/files.txt files.txt
