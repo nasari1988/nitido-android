@@ -5,7 +5,7 @@ on:
   workflow_dispatch:
     inputs:
       que:
-        description: "Qué convertir: fluido (RIFE), realismo (PiSA-SR), limpiar-npu (RealBasicVSR), enfocar-npu (NAFNet), pose-npu[-WxH] (ControlNet de pose) o dreamlite-npu[-WxH] (editor DreamLite)"
+        description: "Qué convertir: fluido (RIFE), realismo (PiSA-SR), limpiar-npu (RealBasicVSR), enfocar-npu (NAFNet), pose-npu[-WxH] (ControlNet de pose), union-npu[-WxH] (ControlNet Union: pose y profundidad) o dreamlite-npu[-WxH] (editor DreamLite)"
         default: fluido
 
 jobs:
@@ -42,6 +42,8 @@ jobs:
             dreamlite-npu) bash ci/dreamlite_npu_build.sh ;;
             dreamlite-npu-*) Q="${{ inputs.que }}"; bash ci/dreamlite_npu_build.sh "${Q#dreamlite-npu-}" ;;
             pose-npu-*) Q="${{ inputs.que }}"; bash ci/control_pose_build.sh "${Q#pose-npu-}" ;;
+            union-npu) bash ci/control_union_build.sh ;;
+            union-npu-*) Q="${{ inputs.que }}"; bash ci/control_union_build.sh "${Q#union-npu-}" ;;
             *) bash ci/rife_build.sh ;;
           esac
       # Limpiar (prueba): the checked weights for a private test run elsewhere; never published
@@ -92,10 +94,11 @@ jobs:
             gh release upload "$T" files.txt --clobber
             exit 0
           fi
-          case "${{ inputs.que }}" in pose-npu*|dreamlite-npu*)
+          case "${{ inputs.que }}" in pose-npu*|dreamlite-npu*|union-npu*)
             # every size in one release; its list keeps the sizes built before
             case "${{ inputs.que }}" in
               pose-npu*) T=modelo-control-pose-npu; NOTES="ControlNet de pose (xinsir, Apache-2.0) para Editar › pulir con SDXL. La app lo descarga sola." ;;
+              union-npu*) T=modelo-control-union-npu; NOTES="ControlNet Union ProMax (xinsir, Apache-2.0): pose y profundidad, y Depth Anything V2 Small (Apache-2.0). Para Editar. La app lo descarga sola." ;;
               *) T=modelo-dreamlite-npu; NOTES="DreamLite-mobile (ByteDance, pesos CC BY-NC 4.0: uso no comercial) para Editar › paso 1. La app lo descarga sola." ;;
             esac
             gh release view "$T" >/dev/null 2>&1 || gh release create "$T" --title "$T" --notes "$NOTES" --latest=false
