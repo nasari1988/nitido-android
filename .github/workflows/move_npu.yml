@@ -1,0 +1,39 @@
+name: Mover archivos NPU a su publicación
+
+on:
+  workflow_dispatch:
+    inputs:
+      etiqueta:
+        description: Publicación del modelo (ej. modelo-lustify-sdxl-inpainting); los archivos NPU van a <etiqueta>-npu
+        required: true
+
+jobs:
+  # NPU files (sdxl_p*, sdxl_ref*, vae_npu*) published in the model's own release go to "<tag>-npu",
+  # where the app looks for them; both file lists are rebuilt. No secrets: only this repo's token.
+  move:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Mover
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          set -e
+          T="${{ inputs.etiqueta }}"; N="$T-npu"
+          gh release view "$N" >/dev/null 2>&1 || gh release create "$N" --title "$N" --notes "Versión para la NPU (Qualcomm). La app la descarga sola."
+          mkdir -p mv && cd mv
+          for f in $(gh api "repos/$GH_REPO/releases/tags/$T" --jq '.assets[].name' | grep -E '^(sdxl_p[0-9]|sdxl_ref|vae_npu)'); do
+            echo "moviendo $f"
+            gh release download "$T" -p "$f" --clobber
+            gh release upload "$N" "$f" --clobber
+            gh release delete-asset "$T" "$f" -y
+            rm -f "$f"
+          done
+          cd ..
+          for R in "$T" "$N"; do
+            gh api "repos/$GH_REPO/releases/tags/$R" --jq '.assets[] | select(.name != "files.txt") | "\(.name) \(.size)"' > files.txt
+            echo "== $R"; cat files.txt
+            gh release upload "$R" files.txt --clobber
+          done
