@@ -31,6 +31,8 @@ jobs:
             gh release delete-asset "$T" "$f" -y
             rm -f "$f"
           done
+          # the model's info.txt also goes with the NPU version (copied, not moved)
+          gh release download "$T" -p info.txt --clobber && gh release upload "$N" info.txt --clobber || true
           cd ..
           for R in "$T" "$N"; do
             gh api "repos/$GH_REPO/releases/tags/$R" --jq '.assets[] | select(.name != "files.txt") | "\(.name) \(.size)"' > files.txt
