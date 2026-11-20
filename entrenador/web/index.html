@@ -1,0 +1,195 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<title>Nítido · Entrenador</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<style>
+:root{--bg:#0A0D0B;--card:#141A16;--line:#2B3A31;--fg:#EDE6D6;--muted:#A8A08E;--acc:#8DBA8A;--warn:#E8C27A;--bad:#E9A99E}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--fg);font:14px/1.45 Inter,system-ui,sans-serif;display:flex;min-height:100vh}
+aside{width:240px;flex:none;border-right:1px solid #1F2923;padding:18px 14px;display:flex;flex-direction:column;gap:6px}
+main{flex:1;padding:22px 26px;display:flex;flex-direction:column;gap:14px;min-width:0}
+h1{margin:0;font-size:22px;font-weight:600}
+button,input{font:inherit}
+.tab,.chip{height:34px;padding:0 13px;border-radius:17px;border:1px solid #3A4A3F;background:transparent;color:#C9C1AE;cursor:pointer}
+.tab.on,.chip.on{background:var(--acc);color:#0A0D0B;border-color:var(--acc);font-weight:600}
+.step{display:flex;align-items:center;gap:10px;height:44px;padding:0 12px;border-radius:10px;color:#C9C1AE;cursor:pointer;border:none;background:none;text-align:left;width:100%}
+.step.on{background:#18241C;color:var(--fg);font-weight:600}
+.num{width:22px;height:22px;border-radius:11px;border:1px solid #3A4A3F;display:inline-flex;align-items:center;justify-content:center;font-size:12px}
+.step.on .num{background:var(--acc);color:#0A0D0B;border-color:var(--acc)}
+.box{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:12px 14px}
+.row{display:flex;gap:10px;align-items:center;flex-wrap:wrap}
+.muted{color:var(--muted);font-size:12px}
+input[type=text]{background:#0F1411;border:1px solid #3A4A3F;border-radius:8px;color:var(--fg);padding:8px 10px;width:100%}
+.main{height:44px;padding:0 22px;border-radius:12px;border:none;background:var(--fg);color:#1F3A26;font-weight:600;cursor:pointer}
+.ghost{height:38px;padding:0 14px;border-radius:10px;border:1px solid #3A4A3F;background:transparent;color:var(--fg);font-weight:600;cursor:pointer}
+.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:10px}
+.pair{border-radius:8px;overflow:hidden;border:1px solid var(--line);background:var(--card);cursor:pointer}
+.pair img{width:50%;height:90px;object-fit:cover;display:inline-block;vertical-align:top}
+.pair div{font-size:11px;color:var(--muted);padding:4px 7px}
+.pair.warn{border-color:#8A6A3A}.pair.off{opacity:.35}
+.stats{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px}
+.stat span{font-size:12px;color:var(--muted);display:block}.stat b{font-size:18px}
+.bar{height:8px;border-radius:4px;background:var(--line)}.bar i{display:block;height:8px;border-radius:4px;background:var(--acc)}
+label.opt{display:flex;align-items:center;gap:10px;min-height:34px}
+label.opt span{flex:1}
+.err{color:var(--bad)}
+img.full{max-width:100%;border-radius:8px}
+</style>
+</head>
+<body>
+<aside>
+  <b style="font-size:17px;padding:0 6px 12px">Nítido · Entrenador</b>
+  <div class="row" style="padding:0 2px 12px"><button class="tab on" data-m="estilo">Mi estilo</button><button class="tab" data-m="piel">Mi piel</button></div>
+  <button class="step on" data-s="1"><span class="num">1</span>Tus pares</button>
+  <button class="step" data-s="2"><span class="num">2</span>Ampliar pares</button>
+  <button class="step" data-s="3"><span class="num">3</span>Entrenar</button>
+  <button class="step" data-s="4"><span class="num">4</span>Probar y exportar</button>
+  <div class="box muted" id="gpu" style="margin-top:auto"></div>
+</aside>
+<main id="main"></main>
+<script>
+let M = "estilo", S = 1, P = null, E = null
+const $ = (q, el = document) => el.querySelector(q)
+const nombre = () => M === "estilo" ? "Mi estilo" : "Mi retoque de piel"
+async function api(path, body) {
+  const r = await fetch(path, body ? { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(Object.assign({ modelo: M }, body)) } : {})
+  const j = await r.json(); if (!r.ok) throw new Error(j.error || r.status); return j
+}
+function esc(s) { return String(s).replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c])) }
+async function cargar() { P = await api("/api/proyecto?modelo=" + M); pintar() }
+document.querySelectorAll(".tab").forEach(b => b.onclick = () => { document.querySelectorAll(".tab").forEach(x => x.classList.toggle("on", x === b)); M = b.dataset.m; cargar() })
+document.querySelectorAll(".step").forEach(b => b.onclick = () => { document.querySelectorAll(".step").forEach(x => x.classList.toggle("on", x === b)); S = +b.dataset.s; pintar() })
+
+function pintar() { ({ 1: pares, 2: aumentos, 3: entrenar, 4: exportar })[S]() }
+
+function pares() {
+  const ps = P.pares || [], ok = ps.filter(p => p.usar !== false).length, avisos = ps.filter(p => p.avisos && p.avisos.length).length
+  $("#main").innerHTML = `
+  <h1>Tus pares · ${nombre()}</h1>
+  <div class="muted">Dos carpetas: tus fotos sin editar y tu edición, con el mismo nombre de archivo. ${M === "piel" ? "Sirven fotos de cara y de cuerpo: se aprende de toda la piel." : ""}</div>
+  <div class="row"><div style="flex:1"><div class="muted">Antes (sin editar)</div><input type="text" id="antes" value="${esc(P.antes_dir || "")}" placeholder="/home/tu_usuario/Fotos/antes"></div>
+  <div style="flex:1"><div class="muted">Después (tu edición)</div><input type="text" id="despues" value="${esc(P.despues_dir || "")}" placeholder="/home/tu_usuario/Fotos/despues"></div>
+  <button class="ghost" id="revisar" style="align-self:flex-end">Revisar</button></div>
+  <div id="msg" class="muted"></div>
+  ${ps.length ? `<div class="row"><b style="color:var(--acc)">${ok} pares listos</b><span style="color:var(--warn)">${avisos ? "· " + avisos + " con aviso" : ""}${(P.sin_pareja || []).length ? " · " + P.sin_pareja.length + " sin pareja" : ""}</span><span class="muted">· toca un par para usarlo o excluirlo</span></div>
+  <div class="grid">${ps.map(p => `<div class="pair ${p.usar === false ? "off" : ""} ${p.avisos && p.avisos.length ? "warn" : ""}" data-n="${esc(p.nombre)}">
+    <img loading="lazy" src="/mini?f=${encodeURIComponent(p.antes)}&lado=200" alt=""><img loading="lazy" src="/mini?f=${encodeURIComponent(p.despues)}&lado=200" alt="">
+    <div>${esc(p.nombre)}${p.avisos && p.avisos.length ? " · " + esc(p.avisos.join(", ")) : ""}${p.usar === false ? " · excluido" : ""}</div></div>`).join("")}</div>
+  <div class="row" style="justify-content:flex-end"><button class="main" onclick="document.querySelector('[data-s=\\'2\\']').click()">Siguiente: ampliar pares ›</button></div>` : ""}`
+  $("#revisar").onclick = async () => {
+    $("#msg").textContent = "Revisando… (puede tardar con muchas fotos)"
+    try { P = await api("/api/pares", { antes: $("#antes").value.trim(), despues: $("#despues").value.trim() }); pintar() } catch (e) { $("#msg").innerHTML = `<span class="err">${esc(e.message)}</span>` }
+  }
+  document.querySelectorAll(".pair").forEach(el => el.onclick = async () => {
+    const p = P.pares.find(x => x.nombre === el.dataset.n); p.usar = p.usar === false
+    await api("/api/usar", { nombre: p.nombre, usar: p.usar }); pintar()
+  })
+}
+
+function aumentos() {
+  const a = Object.assign({}, P.aumentos || {}), n = (P.pares || []).filter(p => p.usar !== false).length
+  const num = (k, t, min, max, paso) => `<label class="opt"><span>${t}</span><input type="number" step="${paso}" min="${min}" max="${max}" data-k="${k}" value="${a[k]}" style="width:90px;background:#0F1411;border:1px solid #3A4A3F;color:var(--fg);border-radius:8px;padding:6px"></label>`
+  const sw = (k, t) => `<label class="opt"><span>${t}</span><input type="checkbox" data-k="${k}" ${a[k] ? "checked" : ""}></label>`
+  $("#main").innerHTML = `
+  <h1>Ampliar pares · ${nombre()}</h1><div class="muted">Se generan al vuelo en cada vuelta: no ocupan disco.</div>
+  <div class="row" style="align-items:flex-start;gap:16px">
+   <div style="width:380px;display:flex;flex-direction:column;gap:12px">
+    <div class="box"><b>A los dos lados igual</b><div class="muted">Cambian el encuadre, no tu edición.</div>
+      ${sw("voltear", "Voltear horizontal")}${num("recorte_min", "Recorte mínimo (parte de la foto)", 0.3, 1, 0.05)}${num("girar", "Girar hasta (grados)", 0, 15, 1)}</div>
+    <div class="box"><b>Solo en el «antes»</b><div class="muted">${M === "piel" ? "En la piel se usan mínimos (el retoque no es de color)." : "Fotos de partida distintas: aprende a llegar a tu edición desde cualquiera."}</div>
+      ${num("exposicion", "Exposición ± (pasos)", 0, 2, 0.1)}${num("temperatura", "Balance de blancos ± (K)", 0, 3000, 100)}${num("contraste", "Contraste ±", 0, 0.6, 0.05)}${num("saturacion", "Saturación ±", 0, 0.6, 0.05)}${sw("ruido", "Ruido de celular")}${sw("jpeg", "Compresión JPEG")}</div>
+    <div class="box" style="border-color:#5A4220;color:#F0D2A6">Tu «después» nunca cambia de color: es lo que el modelo debe aprender.</div>
+   </div>
+   <div style="flex:1;min-width:0;display:flex;flex-direction:column;gap:10px">
+    <div class="row"><span class="muted" style="flex:1" id="vnom">Ejemplos (izquierda «antes», derecha tu edición)</span><button class="ghost" id="otro">Ver ejemplos</button></div>
+    <div class="grid" id="vistas" style="grid-template-columns:repeat(auto-fill,minmax(250px,1fr))"></div>
+    <div class="box row"><div style="flex:1"><div class="muted">Variantes por par</div><input type="range" min="1" max="60" data-k="variantes" value="${a.variantes}" style="width:100%"></div>
+     <div style="text-align:right"><div class="muted">${n} pares × <span id="vv">${a.variantes}</span></div><b style="font-size:22px;color:var(--acc)" id="tot">${(n * a.variantes).toLocaleString("es-MX")} ejemplos</b></div></div>
+    <div class="row" style="justify-content:flex-end"><button class="main" onclick="document.querySelector('[data-s=\\'3\\']').click()">Siguiente: entrenar ›</button></div>
+   </div></div>`
+  document.querySelectorAll("[data-k]").forEach(el => el.onchange = el.oninput = async () => {
+    const k = el.dataset.k; a[k] = el.type === "checkbox" ? el.checked : +el.value
+    if (k === "variantes") { $("#vv").textContent = a[k]; $("#tot").textContent = (n * a[k]).toLocaleString("es-MX") + " ejemplos" }
+    P.aumentos = await api("/api/aumentos", { aumentos: a })
+  })
+  $("#otro").onclick = async () => {
+    $("#vistas").innerHTML = '<span class="muted">Generando…</span>'
+    try { const r = await api("/api/vista_aumentos", {}); $("#vnom").textContent = r.nombre + " · 8 variantes (la primera es el original)"; $("#vistas").innerHTML = r.vistas.map(v => `<img class="full" src="${v}" alt="">`).join("") }
+    catch (e) { $("#vistas").innerHTML = `<span class="err">${esc(e.message)}</span>` }
+  }
+}
+
+function fmt(s) { if (s == null) return "—"; const h = Math.floor(s / 3600), m = Math.floor(s % 3600 / 60); return h ? `~${h} h ${m} min` : `~${m} min` }
+function grafica(a, b) {
+  const v = a.concat(b); if (v.length < 2) return '<div class="muted">La curva aparece después de 2 vueltas.</div>'
+  const mx = Math.max(...v), mn = Math.min(...v), W = 460, H = 220, n = Math.max(a.length, b.length)
+  const pts = s => s.map((y, i) => `${30 + i * (W - 40) / Math.max(1, n - 1)},${10 + (H - 30) * (1 - (y - mn) / Math.max(1e-9, mx - mn))}`).join(" ")
+  return `<svg viewBox="0 0 ${W} ${H}" style="width:100%" role="img" aria-label="Curva de error"><polyline fill="none" stroke="#8DBA8A" stroke-width="2.5" points="${pts(a)}"/><polyline fill="none" stroke="#E8A04A" stroke-width="2" stroke-dasharray="5 4" points="${pts(b)}"/><text x="30" y="${H - 4}" fill="#A8A08E" font-size="11">vuelta 1</text><text x="${W - 90}" y="${H - 4}" fill="#A8A08E" font-size="11">vuelta ${n}</text></svg>
+  <div class="muted"><span style="color:#8DBA8A">— entrenamiento</span> · <span style="color:#E8A04A">- - fotos apartadas</span> (más bajo es mejor)</div>`
+}
+function entrenar() {
+  const c = E && E.corridas && E.corridas[M], fase = c ? c.fase : "sin empezar", activo = c && ["preparando", "buscando piel", "entrenando", "en pausa"].includes(fase)
+  $("#main").innerHTML = `
+  <div class="row"><h1 style="flex:1">Entrenar · ${nombre()}</h1>
+   ${activo ? `<button class="ghost" id="pausa">${fase === "en pausa" ? "Seguir" : "Pausar"}</button><button class="ghost" id="alto" style="border-color:#5A3A34;color:var(--bad)">Detener y guardar</button>`
+    : `<label class="muted">Vueltas <input type="number" id="vueltas" value="${M === "estilo" ? 40 : 60}" min="1" max="500" style="width:70px;background:#0F1411;border:1px solid #3A4A3F;color:var(--fg);border-radius:8px;padding:6px"></label>
+       <label class="muted"><input type="checkbox" id="cero"> desde cero</label><button class="main" id="ir">${E && E.proyectos[M].mejor ? "Seguir entrenando" : "Empezar"}</button>`}</div>
+  <div class="muted">${c ? esc(c.mensaje) : (M === "estilo" ? "Tablas de color 3D + red diminuta · piezas de 384 px · lote 8" : "U-Net pequeña · piezas de piel de 512 px de todo el cuerpo · lote 4 · media precisión")}</div>
+  <div class="stats">
+   <div class="box stat"><span>Vuelta</span><b>${c ? c.vuelta + " de " + c.vueltas : "—"}</b></div>
+   <div class="box stat"><span>Falta</span><b>${c ? fmt(c.falta_s) : "—"}</b></div>
+   <div class="box stat"><span>Parecido a tu edición</span><b style="color:var(--acc)">${c && c.parecido != null ? c.parecido + " %" : "—"}</b></div>
+   <div class="box stat"><span>Mejor guardado</span><b>${c && c.mejor ? "vuelta " + c.mejor.vuelta : "—"}</b></div></div>
+  <div class="bar"><i style="width:${c && c.vueltas ? Math.round(100 * ((c.vuelta + (c.paso || 0) / Math.max(1, c.pasos)) / c.vueltas)) : 0}%"></i></div>
+  <div class="row" style="align-items:flex-start;gap:16px">
+   <div class="box" style="flex:1;min-width:300px">${c ? grafica(c.perdida, c.prueba) : '<div class="muted">Aún no hay vueltas.</div>'}<div class="muted">Se apartan fotos que nunca ve al entrenar para medir si aprende y no solo memoriza. Se guarda una copia en cada vuelta: si se apaga la PC, sigue desde la última.</div></div>
+   <div class="box" style="width:470px"><b>Ejemplos de la última vuelta</b><div class="muted">antes · modelo · tu edición</div><img class="full" id="muestra" src="/api/muestra?modelo=${M}&t=${Date.now()}" alt="" onerror="this.replaceWith(Object.assign(document.createElement('div'),{className:'muted',textContent:'Aparecen al terminar la primera vuelta.'}))"></div></div>`
+  if ($("#ir")) $("#ir").onclick = async () => { try { await api("/api/entrenar", { vueltas: +$("#vueltas").value, desde_cero: $("#cero").checked }); setTimeout(estado, 800) } catch (e) { alerta(e) } }
+  if ($("#pausa")) $("#pausa").onclick = () => api(fase === "en pausa" ? "/api/seguir" : "/api/pausar", {}).then(estado)
+  if ($("#alto")) $("#alto").onclick = () => api("/api/detener", {}).then(estado)
+}
+function alerta(e) { $("#main").insertAdjacentHTML("afterbegin", `<div class="box err">${esc(e.message)}</div>`) }
+
+function exportar() {
+  const pr = E ? E.proyectos[M] : {}
+  $("#main").innerHTML = `
+  <h1>Probar y exportar · ${nombre()}</h1>
+  ${pr.mejor ? "" : '<div class="box" style="color:var(--warn)">Primero entrena: aún no hay un modelo guardado.</div>'}
+  <div class="row" style="align-items:flex-start;gap:16px">
+   <div style="flex:1;min-width:0;display:flex;flex-direction:column;gap:10px">
+    <div class="row"><input type="text" id="carpeta" value="${esc(P.prueba_dir || "")}" placeholder="Carpeta con fotos nuevas que el modelo nunca vio" style="flex:1"><button class="ghost" id="probar">Probar</button></div>
+    <div id="pruebas" class="grid" style="grid-template-columns:repeat(auto-fill,minmax(300px,1fr))"></div>
+   </div>
+   <div class="box" style="width:380px;display:flex;flex-direction:column;gap:10px;border-color:var(--acc)">
+    <b>Exportar para el teléfono</b>
+    <div class="muted">Crea la carpeta <code>proyectos/${M}/exportado/${M}_vN</code> con el modelo (.onnx) y su ficha. Solo sale el modelo: tus fotos se quedan en esta PC. El ONNX se revisa contra PyTorch.</div>
+    <div class="muted">Versiones: ${pr.exportados && pr.exportados.length ? esc(pr.exportados.join(", ")) : "ninguna"}</div>
+    <button class="main" id="exp" ${pr.mejor ? "" : "disabled"}>Exportar la mejor vuelta</button><div id="expmsg" class="muted"></div>
+   </div></div>`
+  $("#probar").onclick = async () => {
+    $("#pruebas").innerHTML = '<span class="muted">Probando…</span>'
+    try { const r = await api("/api/probar", { carpeta: $("#carpeta").value.trim() }); P.prueba_dir = $("#carpeta").value.trim()
+      $("#pruebas").innerHTML = r.hechos.map(h => `<div><img class="full" src="/mini?f=${encodeURIComponent(h.archivo)}&lado=900" alt=""><div class="muted">${esc(h.nombre)} · ${h.ms} ms · izquierda antes, derecha modelo</div></div>`).join("") || '<span class="muted">No encontré fotos en esa carpeta.</span>' }
+    catch (e) { $("#pruebas").innerHTML = `<span class="err">${esc(e.message)}</span>` }
+  }
+  $("#exp").onclick = async () => {
+    $("#expmsg").textContent = "Exportando…"
+    try { const r = await api("/api/exportar", {}); $("#expmsg").innerHTML = `Listo: <b>${esc(r.archivo)}</b> v${r.version} · ${r.mb} MB · diferencia contra PyTorch ${r.diferencia_onnx == null ? "sin revisar" : r.diferencia_onnx.toExponential(1)}<br>${esc(r.carpeta)}`; estado() }
+    catch (e) { $("#expmsg").innerHTML = `<span class="err">${esc(e.message)}</span>` }
+  }
+}
+
+async function estado() {
+  try {
+    E = await api("/api/estado")
+    const g = E.gpu_info || {}
+    $("#gpu").innerHTML = E.gpu ? `<b style="color:var(--fg)">${esc(E.gpu)}</b><br>${g.temp != null ? g.temp + " °C · " : ""}${g.vram != null ? "memoria " + g.vram + " de " + g.vram_total + " GB" : ""}` : '<b style="color:var(--warn)">Sin tarjeta NVIDIA</b><br>se usa el procesador (lento)'
+    if (S === 3) entrenar()
+  } catch (e) { }
+}
+cargar(); estado(); setInterval(() => { if (S === 3) estado() }, 3000)
+</script>
+</body>
+</html>

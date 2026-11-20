@@ -1,0 +1,4 @@
+.venv/
+proyectos/
+modelos_base/
+__pycache__/
