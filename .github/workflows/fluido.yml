@@ -5,7 +5,7 @@ on:
   workflow_dispatch:
     inputs:
       que:
-        description: "Qué convertir: fluido (RIFE), realismo (PiSA-SR), limpiar-npu (RealBasicVSR), enfocar-npu (NAFNet), pose-npu[-WxH] (ControlNet de pose), union-npu[-WxH] (ControlNet Union: pose y profundidad) o dreamlite-npu[-WxH] (editor DreamLite)"
+        description: "Qué convertir: fluido (RIFE), realismo (PiSA-SR), caras-osdface (OSDFace), limpiar-npu (RealBasicVSR), enfocar-npu (NAFNet), pose-npu[-WxH] (ControlNet de pose), union-npu[-WxH] (ControlNet Union: pose y profundidad) o dreamlite-npu[-WxH] (editor DreamLite)"
         default: fluido
 
 jobs:
@@ -33,6 +33,7 @@ jobs:
         run: |
           case "${{ inputs.que }}" in
             realismo) bash ci/pisa_build.sh ;;
+            caras-osdface) bash ci/osdface_build.sh ;;
             limpiar) bash ci/rbvsr_build.sh ;;
             limpiar-npu) bash ci/rbvsr_npu_build.sh ;;
             enfocar-npu) bash ci/nafnet_build.sh ;;
