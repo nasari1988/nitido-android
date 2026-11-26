@@ -69,6 +69,25 @@ class PlaybackService : MediaSessionService() {
     }
 }
 
+/** Preferencias de reproducción. */
+object PlayPrefs {
+    var videoAutoplay by mutableStateOf(true)
+    var musicAutoNext by mutableStateOf(true)
+    private var ctx: Context? = null
+
+    fun load(c: Context) {
+        ctx = c.applicationContext
+        val p = c.getSharedPreferences("reproduccion", Context.MODE_PRIVATE)
+        videoAutoplay = p.getBoolean("videoAutoplay", true)
+        musicAutoNext = p.getBoolean("musicAutoNext", true)
+    }
+
+    fun save() {
+        ctx?.getSharedPreferences("reproduccion", Context.MODE_PRIVATE)?.edit()
+            ?.putBoolean("videoAutoplay", videoAutoplay)?.putBoolean("musicAutoNext", musicAutoNext)?.apply()
+    }
+}
+
 /** Estado y control de la música para toda la app (la UI lo observa). */
 object Music {
     private var future: ListenableFuture<MediaController>? = null
@@ -104,6 +123,10 @@ object Music {
     var sleepAt by mutableStateOf<Long?>(null)
         private set
     var showNowPlaying by mutableStateOf(false)
+    /** De dónde viene la cola: "Carpeta · Música" o "Lista · Para el camino". */
+    var source by mutableStateOf("")
+    /** Cambia cada vez que la cola cambia (para redibujar "A continuación"). */
+    var queueVersion by mutableStateOf(0)
 
     fun connect(ctx: Context) {
         if (future != null) return
@@ -114,7 +137,14 @@ object Music {
             val c = try { f.get() } catch (e: Exception) { future = null; return@addListener }
             controller = c
             c.addListener(object : Player.Listener {
-                override fun onEvents(player: Player, events: Player.Events) = sync()
+                override fun onEvents(player: Player, events: Player.Events) {
+                    if (events.contains(Player.EVENT_TIMELINE_CHANGED)) queueVersion++
+                    sync()
+                }
+                override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
+                    // "Al terminar una, seguir con la siguiente" apagado: se detiene al cambiar sola.
+                    if (reason == Player.MEDIA_ITEM_TRANSITION_REASON_AUTO && !PlayPrefs.musicAutoNext) c.pause()
+                }
             })
             sync()
             pending?.invoke()
@@ -168,8 +198,9 @@ object Music {
         )
         .build()
 
-    fun play(ctx: Context, tracks: List<Track>, start: Int = 0, shuffled: Boolean = false) {
+    fun play(ctx: Context, tracks: List<Track>, start: Int = 0, shuffled: Boolean = false, label: String? = null) {
         if (tracks.isEmpty()) return
+        source = label ?: ("Carpeta · " + tracks[start.coerceIn(0, tracks.lastIndex)].path.substringBeforeLast('/').substringAfterLast('/'))
         val action = {
             controller?.run {
                 queue = tracks
@@ -184,8 +215,42 @@ object Music {
     }
 
     /** Reproducir archivos sueltos del explorador (los datos se leen del propio archivo). */
-    fun playFiles(ctx: Context, paths: List<String>, start: Int) {
-        play(ctx, paths.map { Track(it, it.substringAfterLast('/').substringBeforeLast('.'), "", "", 0) }, start)
+    fun playFiles(ctx: Context, paths: List<String>, start: Int, label: String? = null) {
+        play(ctx, paths.map { Track(it, it.substringAfterLast('/').substringBeforeLast('.'), "", "", 0) }, start, label = label)
+    }
+
+    /** Toda la carpeta de la canción actual, en orden por nombre. */
+    fun playFolder(ctx: Context, folder: String, startPath: String?) {
+        val songs = File(folder).listFiles().orEmpty()
+            .filter { it.isFile && FileTypes.kindOf(it.name) == FileKind.AUDIO }
+            .sortedBy { it.name.lowercase() }.map { it.absolutePath }
+        if (songs.isEmpty()) return
+        val keepPos = if (startPath != null && startPath == currentPath) controller?.currentPosition ?: 0 else 0
+        playFiles(ctx, songs, songs.indexOf(startPath).coerceAtLeast(0))
+        if (keepPos > 0) controller?.seekTo(keepPos)
+    }
+
+    /** Lo que sigue, en el orden en que va a sonar (respeta aleatorio). Par = (índice en la cola, canción). */
+    fun upcoming(): List<Pair<Int, Track>> {
+        val c = controller ?: return emptyList()
+        val tl = c.currentTimeline
+        if (tl.isEmpty) return emptyList()
+        val out = ArrayList<Pair<Int, Track>>()
+        var i = c.currentMediaItemIndex
+        var guard = 0
+        while (i != C.INDEX_UNSET && guard++ < 1000) {
+            val id = c.getMediaItemAt(i).mediaId
+            out += i to (queue.firstOrNull { it.path == id } ?: Track(id, id.substringAfterLast('/').substringBeforeLast('.'), "", "", 0))
+            i = tl.getNextWindowIndex(i, Player.REPEAT_MODE_OFF, c.shuffleModeEnabled)
+        }
+        return out
+    }
+
+    /** Reordenar la cola arrastrando. */
+    fun move(from: Int, to: Int) {
+        controller?.moveMediaItem(from, to)
+        queue = PlayOrder.move(queue, from, to)
+        queueVersion++
     }
 
     fun toggle() = controller?.run { if (isPlaying) pause() else { if (playbackState == Player.STATE_ENDED) seekTo(0); play() } }
@@ -224,14 +289,16 @@ object Music {
 }
 
 /** Petición de abrir el reproductor de video (lista de archivos y cuál empezar). */
-data class VideoRequest(val paths: List<String>, val index: Int)
+data class VideoRequest(val paths: List<String>, val index: Int, val source: String = "")
 
 object Playback {
     var video by mutableStateOf<VideoRequest?>(null)
 
-    fun playVideo(paths: List<String>, start: Int) {
+    fun playVideo(paths: List<String>, start: Int, source: String? = null) {
+        if (paths.isEmpty()) return
         Music.pause()
-        video = VideoRequest(paths, start.coerceIn(0, (paths.size - 1).coerceAtLeast(0)))
+        val i = start.coerceIn(0, paths.lastIndex)
+        video = VideoRequest(paths, i, source ?: ("Carpeta: " + File(paths[i]).parentFile?.name.orEmpty()))
     }
 }
 

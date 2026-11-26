@@ -91,7 +91,7 @@ class SelfTestViewModel(app: Application) : AndroidViewModel(app) {
 
     private val ctx: Context get() = getApplication()
     private val sandbox = File(Protection.rootPath, "Download/ArchivosAutoprueba")
-    val total = 27
+    val total = 30
 
     fun run() {
         if (running) return
@@ -393,6 +393,54 @@ class SelfTestViewModel(app: Application) : AndroidViewModel(app) {
             if (ip != null) ok("Dirección en tu red: $ip") else TestStatus.WARN to "No estás en Wi‑Fi: Transferir a PC no funcionará hasta conectarte"
         }
 
+        test("Detectar audio en videos") {
+            val tone = File(sandbox, "con_sonido.wav").also { writeTone(it, 8) }
+            val quiet = File(sandbox, "en_silencio.wav").also { writeWav(it, 8, 0) }
+            val a = AudioCheck.analyze(tone.absolutePath)
+            val b = AudioCheck.analyze(quiet.absolutePath)
+            if (a != AudioState.HAS || b != AudioState.SILENT) return@test fail("Tono: ${a.label}; silencio: ${b.label}")
+            val first = MediaQueries.category(ctx, BrowseCategory.VIDEOS).firstOrNull()
+            val extra = first?.let { e ->
+                val t0 = System.currentTimeMillis()
+                val r = AudioCheck.analyze(e.path)
+                " · Tu video \"${e.name}\": ${r.label} (${System.currentTimeMillis() - t0} ms)"
+            } ?: ""
+            ok("Sonido y silencio bien distinguidos$extra")
+        }
+
+        test("Listas de reproducción") {
+            Playlists.load(ctx)
+            val song = File(sandbox, "lista.mp3").apply { writeText("x") }.absolutePath
+            val video = File(sandbox, "lista.mp4").apply { writeText("x") }.absolutePath
+            val p = Playlists.create(ctx, "Autoprueba", listOf(song))
+            Playlists.add(ctx, p.id, listOf(video, song))
+            Playlists.rename(ctx, p.id, "Autoprueba 2")
+            val got = Playlists.lists.firstOrNull { it.id == p.id }
+            // Se relee del archivo para confirmar que se guardó.
+            val saved = File(ctx.filesDir, "listas.json").readText()
+            Playlists.remove(ctx, p.id, song)
+            val afterRemove = Playlists.lists.firstOrNull { it.id == p.id }?.items
+            Playlists.delete(ctx, p.id)
+            check(
+                got?.name == "Autoprueba 2" && got.items == listOf(song, video) && got.audio.size == 1 && got.videos.size == 1 &&
+                    "Autoprueba 2" in saved && afterRemove == listOf(video) && Playlists.lists.none { it.id == p.id },
+                "Crear, agregar sin repetir, renombrar, guardar, quitar y borrar",
+                "Resultado inesperado: ${got?.items?.size} elementos, nombre ${got?.name}"
+            )
+        }
+
+        test("Orden: siguiente, repetir y aleatorio") {
+            val l = (1..10).map { "v$it" }
+            val sh = PlayOrder.shuffled(l, 4, 7)
+            check(
+                PlayOrder.next(3, 10, false) == 4 && PlayOrder.next(9, 10, false) == null && PlayOrder.next(9, 10, true) == 0 &&
+                    sh.first() == "v5" && sh.toSet() == l.toSet() && sh.size == 10 &&
+                    PlayOrder.move(listOf("a", "b", "c"), 0, 2) == listOf("b", "c", "a"),
+                "Sigue al siguiente, vuelve al inicio con repetir y mezcla sin perder ninguno",
+                "El orden de reproducción no es el esperado"
+            )
+        }
+
         test("Fondo de pantalla para el vidrio") {
             val d = try { WallpaperManager.getInstance(ctx).drawable } catch (e: Exception) { null }
             if (d != null) ok("Se puede leer tu fondo") else TestStatus.WARN to "No se pudo leer: se usan colores suaves"
@@ -429,14 +477,16 @@ class SelfTestViewModel(app: Application) : AndroidViewModel(app) {
     } ?: false
 
     /** Tono de 440 Hz en WAV (PCM 16 bits, mono, 44.1 kHz). */
-    private fun writeTone(f: File, seconds: Int) {
+    private fun writeTone(f: File, seconds: Int) = writeWav(f, seconds, 8000)
+
+    private fun writeWav(f: File, seconds: Int, amp: Int) {
         val rate = 44_100
         val n = rate * seconds
         val data = java.nio.ByteBuffer.allocate(44 + n * 2).order(java.nio.ByteOrder.LITTLE_ENDIAN)
         data.put("RIFF".toByteArray()).putInt(36 + n * 2).put("WAVE".toByteArray())
         data.put("fmt ".toByteArray()).putInt(16).putShort(1).putShort(1).putInt(rate).putInt(rate * 2).putShort(2).putShort(16)
         data.put("data".toByteArray()).putInt(n * 2)
-        for (i in 0 until n) data.putShort((Math.sin(2 * Math.PI * 440 * i / rate) * 8000).toInt().toShort())
+        for (i in 0 until n) data.putShort((Math.sin(2 * Math.PI * 440 * i / rate) * amp).toInt().toShort())
         f.writeBytes(data.array())
     }
 

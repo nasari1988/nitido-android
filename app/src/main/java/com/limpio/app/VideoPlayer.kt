@@ -17,6 +17,19 @@ import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.material.icons.automirrored.filled.PlaylistAdd
+import androidx.compose.material.icons.automirrored.filled.PlaylistPlay
+import androidx.compose.material.icons.automirrored.filled.QueueMusic
+import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.Folder
+import androidx.compose.material.icons.filled.Repeat
+import androidx.compose.material.icons.filled.Shuffle
+import androidx.compose.material3.Switch
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.gestures.detectVerticalDragGestures
 import androidx.compose.foundation.layout.Arrangement
@@ -134,8 +147,19 @@ fun VideoPlayerScreen(req: VideoRequest, onClose: () -> Unit) {
     val activity = remember { ctx.findActivity() }
     val view = LocalView.current
     val player = remember { ExoPlayer.Builder(ctx).setSeekBackIncrementMs(10_000).setSeekForwardIncrementMs(10_000).build() }
+    // La cola es editable: origen Carpeta/Lista, aleatorio y repetir.
+    var baseList by remember { mutableStateOf(req.paths) }
+    var list by remember { mutableStateOf(req.paths) }
+    var source by remember { mutableStateOf(req.source) }
     var index by remember { mutableIntStateOf(req.index) }
-    val path = req.paths.getOrNull(index) ?: return
+    var shuffle by remember { mutableStateOf(false) }
+    var repeat by remember { mutableStateOf(false) }
+    var countdown by remember { mutableStateOf<Int?>(null) }
+    var showQueue by remember { mutableStateOf(false) }
+    var sourceMenu by remember { mutableStateOf(false) }
+    var addToList by remember { mutableStateOf<List<String>?>(null) }
+    LaunchedEffect(Unit) { Playlists.load(ctx) }
+    val path = list.getOrNull(index) ?: return
 
     var playing by remember { mutableStateOf(true) }
     var position by remember { mutableLongStateOf(0L) }
@@ -156,6 +180,34 @@ fun VideoPlayerScreen(req: VideoRequest, onClose: () -> Unit) {
 
     fun flash(text: String) { hint = text; hintAt = System.currentTimeMillis() }
     fun saveNow() = VideoPositions.save(ctx, path, player.currentPosition, player.duration)
+    fun goTo(i: Int) {
+        if (i !in list.indices) return
+        countdown = null
+        if (i != index) { saveNow(); index = i } else { player.seekTo(0); player.play() }
+    }
+    fun setQueue(paths: List<String>, label: String) {
+        if (paths.isEmpty()) return
+        val cur = path
+        baseList = paths
+        list = if (shuffle) PlayOrder.shuffled(paths, paths.indexOf(cur).coerceAtLeast(0)) else paths
+        source = label
+        val i = list.indexOf(cur)
+        if (i >= 0) index = i else { saveNow(); index = 0 }
+        countdown = null
+    }
+    fun folderVideos(): List<String> = File(path).parentFile?.listFiles().orEmpty()
+        .filter { it.isFile && FileTypes.kindOf(it.name) == FileKind.VIDEO }
+        .sortedBy { it.name.lowercase() }.map { it.absolutePath }
+    val nextIndex = PlayOrder.next(index, list.size, repeat)
+    // Al terminar: cuenta de 5 s y sigue con el siguiente (o cierra si no hay más).
+    val onEnded = androidx.compose.runtime.rememberUpdatedState {
+        VideoPositions.save(ctx, path, 0, 0)
+        when {
+            nextIndex == null -> onClose()
+            PlayPrefs.videoAutoplay -> countdown = 5
+            else -> controls = true
+        }
+    }
 
     // Cargar el video (y retomar donde te quedaste).
     LaunchedEffect(path) {
@@ -174,10 +226,7 @@ fun VideoPlayerScreen(req: VideoRequest, onClose: () -> Unit) {
                 hasSubs = p.currentTracks.containsType(C.TRACK_TYPE_TEXT)
             }
             override fun onPlaybackStateChanged(state: Int) {
-                if (state == Player.STATE_ENDED) {
-                    VideoPositions.save(ctx, path, 0, 0)
-                    if (index < req.paths.lastIndex) index++ else onClose()
-                }
+                if (state == Player.STATE_ENDED) onEnded.value()
             }
             override fun onVideoSizeChanged(size: androidx.media3.common.VideoSize) {
                 // Gira solo la pantalla para videos horizontales (la primera vez).
@@ -198,7 +247,7 @@ fun VideoPlayerScreen(req: VideoRequest, onClose: () -> Unit) {
         val pipListener = Consumer<androidx.core.app.PictureInPictureModeChangedInfo> { inPip = it.isInPictureInPictureMode }
         (activity as? ComponentActivity)?.addOnPictureInPictureModeChangedListener(pipListener)
         onDispose {
-            VideoPositions.save(ctx, req.paths.getOrNull(index) ?: path, player.currentPosition, player.duration)
+            VideoPositions.save(ctx, list.getOrNull(index) ?: path, player.currentPosition, player.duration)
             player.removeListener(listener)
             player.release()
             (activity as? ComponentActivity)?.removeOnPictureInPictureModeChangedListener(pipListener)
@@ -224,9 +273,20 @@ fun VideoPlayerScreen(req: VideoRequest, onClose: () -> Unit) {
     LaunchedEffect(controls, playing, position / 3000) {
         if (controls && playing && !locked) { delay(3500); controls = false }
     }
+    LaunchedEffect(countdown) {
+        val c = countdown ?: return@LaunchedEffect
+        if (c > 0) { delay(1000); if (countdown == c) countdown = c - 1 }
+        else { countdown = null; nextIndex?.let { goTo(it) } }
+    }
     LaunchedEffect(resumedFrom) { if (resumedFrom > 0) { delay(5000); resumedFrom = 0 } }
 
-    BackHandler { if (locked) flash("Pantalla bloqueada: toca el candado") else onClose() }
+    BackHandler {
+        when {
+            locked -> flash("Pantalla bloqueada: toca el candado")
+            showQueue -> showQueue = false
+            else -> onClose()
+        }
+    }
 
     val audio = remember { ctx.getSystemService(Context.AUDIO_SERVICE) as AudioManager }
     val maxVol = remember { audio.getStreamMaxVolume(AudioManager.STREAM_MUSIC).coerceAtLeast(1) }
@@ -295,6 +355,76 @@ fun VideoPlayerScreen(req: VideoRequest, onClose: () -> Unit) {
             )
         }
 
+        countdown?.let { c ->
+            val n = nextIndex?.let { list.getOrNull(it) }
+            if (n != null && !inPip) {
+                Row(
+                    Modifier.align(Alignment.BottomEnd).safeDrawingPadding().padding(16.dp).widthIn(max = 340.dp)
+                        .clip(RoundedCornerShape(18.dp)).background(Color(0xCC1C1C1E)).padding(10.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    FileThumb(n, false, modifier = Modifier.size(width = 84.dp, height = 52.dp).clip(RoundedCornerShape(10.dp)))
+                    Spacer(Modifier.width(10.dp))
+                    Column(Modifier.weight(1f)) {
+                        Text("Siguiente en $c s", color = Color(0xFF8CF0C8), style = MaterialTheme.typography.labelMedium)
+                        Text(File(n).name, color = Color.White, maxLines = 1, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.bodySmall)
+                        Row {
+                            TextButton(onClick = { countdown = null; controls = true }) { Text("Cancelar", color = Color.White) }
+                            TextButton(onClick = { countdown = 0 }) { Text("Reproducir ya", color = Color(0xFF8CF0C8)) }
+                        }
+                    }
+                }
+            }
+        }
+
+        AnimatedVisibility(
+            showQueue && !inPip && !locked, enter = fadeIn(), exit = fadeOut(),
+            modifier = Modifier.align(Alignment.CenterEnd)
+        ) {
+            Column(
+                Modifier.fillMaxHeight().widthIn(max = 330.dp).fillMaxWidth(0.85f).safeDrawingPadding().padding(8.dp)
+                    .clip(RoundedCornerShape(20.dp)).background(Color(0xE61C1C1E)).padding(12.dp)
+            ) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Column(Modifier.weight(1f)) {
+                        Text("A continuación", color = Color.White, fontWeight = FontWeight.SemiBold)
+                        Text(source, color = Color(0xAAFFFFFF), style = MaterialTheme.typography.labelSmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    }
+                    IconButton(onClick = { showQueue = false }) { Icon(Icons.Filled.Close, "Cerrar", tint = Color.White) }
+                }
+                Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(vertical = 4.dp)) {
+                    Text("Reproducir el siguiente al terminar", color = Color.White, style = MaterialTheme.typography.bodySmall, modifier = Modifier.weight(1f))
+                    Switch(checked = PlayPrefs.videoAutoplay, onCheckedChange = { PlayPrefs.videoAutoplay = it; PlayPrefs.save() })
+                }
+                LazyColumn(Modifier.weight(1f)) {
+                    itemsIndexed(list, key = { i, p -> "$i|$p" }) { i, p ->
+                        Row(
+                            Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp))
+                                .background(if (i == index) Color(0x338CF0C8) else Color.Transparent)
+                                .clickable { goTo(i) }.padding(6.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Box {
+                                FileThumb(p, false, modifier = Modifier.size(width = 72.dp, height = 44.dp).clip(RoundedCornerShape(8.dp)))
+                                AudioBadge(AudioScan.states[p] ?: AudioCheck.cached(p), Modifier.align(Alignment.BottomEnd).padding(2.dp), 14.dp)
+                            }
+                            Spacer(Modifier.width(8.dp))
+                            Text(
+                                (if (i == index) "▶ " else "") + File(p).nameWithoutExtension, color = Color.White, maxLines = 2,
+                                overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.bodySmall
+                            )
+                        }
+                    }
+                }
+                TextButton(onClick = { addToList = listOf(path) }, modifier = Modifier.fillMaxWidth()) {
+                    Icon(Icons.AutoMirrored.Filled.PlaylistAdd, null, tint = Color(0xFF8CF0C8))
+                    Spacer(Modifier.width(6.dp))
+                    Text("Agregar a lista", color = Color(0xFF8CF0C8))
+                }
+            }
+        }
+        addToList?.let { p -> AddToPlaylistDialog(p) { addToList = null } }
+
         if (locked && !inPip) {
             IconButton(
                 onClick = { locked = false; controls = true },
@@ -316,6 +446,35 @@ fun VideoPlayerScreen(req: VideoRequest, onClose: () -> Unit) {
                         File(path).name, color = Color.White, maxLines = 1, overflow = TextOverflow.Ellipsis,
                         modifier = Modifier.weight(1f), fontWeight = FontWeight.SemiBold
                     )
+                    Box {
+                        TextButton(onClick = { sourceMenu = true }) {
+                            Text(source.ifEmpty { "Carpeta" } + " ▾", color = Color(0xFF8CF0C8), maxLines = 1, overflow = TextOverflow.Ellipsis,
+                                style = MaterialTheme.typography.labelMedium, modifier = Modifier.widthIn(max = 150.dp))
+                        }
+                        DropdownMenu(expanded = sourceMenu, onDismissRequest = { sourceMenu = false }) {
+                            val folder = File(path).parentFile?.name.orEmpty()
+                            DropdownMenuItem(
+                                text = { Text("Carpeta: $folder") },
+                                leadingIcon = { Icon(Icons.Filled.Folder, null) },
+                                onClick = { sourceMenu = false; setQueue(folderVideos(), "Carpeta: $folder") }
+                            )
+                            Playlists.all().filter { it.videos.isNotEmpty() }.forEach { p ->
+                                DropdownMenuItem(
+                                    text = { Text("Lista: ${p.name} (${p.videos.size})") },
+                                    leadingIcon = { Icon(Icons.AutoMirrored.Filled.QueueMusic, null) },
+                                    onClick = { sourceMenu = false; setQueue(p.videos.filter { File(it).exists() }, "Lista: ${p.name}") }
+                                )
+                            }
+                            DropdownMenuItem(
+                                text = { Text("Agregar este video a una lista…") },
+                                leadingIcon = { Icon(Icons.AutoMirrored.Filled.PlaylistAdd, null) },
+                                onClick = { sourceMenu = false; addToList = listOf(path) }
+                            )
+                        }
+                    }
+                    IconButton(onClick = { showQueue = !showQueue }) {
+                        Icon(Icons.AutoMirrored.Filled.PlaylistPlay, "A continuación", tint = Color.White)
+                    }
                     if (hasSubs) {
                         IconButton(onClick = {
                             subsOn = !subsOn
@@ -356,13 +515,15 @@ fun VideoPlayerScreen(req: VideoRequest, onClose: () -> Unit) {
                     horizontalArrangement = Arrangement.spacedBy(28.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    if (req.paths.size > 1) RoundBtn(Icons.Filled.SkipPrevious, "Anterior", 52) { if (index > 0) { saveNow(); index-- } }
+                    if (list.size > 1) RoundBtn(Icons.Filled.SkipPrevious, "Anterior", 52) {
+                        if (player.currentPosition > 3000 || (index == 0 && !repeat)) player.seekTo(0) else goTo(if (index > 0) index - 1 else list.lastIndex)
+                    }
                     RoundBtn(Icons.Filled.Replay10, "Retroceder 10 segundos", 56) { player.seekBack() }
                     RoundBtn(if (playing) Icons.Filled.Pause else Icons.Filled.PlayArrow, if (playing) "Pausar" else "Reproducir", 72) {
                         if (player.isPlaying) player.pause() else player.play()
                     }
                     RoundBtn(Icons.Filled.Forward10, "Adelantar 10 segundos", 56) { player.seekForward() }
-                    if (req.paths.size > 1) RoundBtn(Icons.Filled.SkipNext, "Siguiente", 52) { if (index < req.paths.lastIndex) { saveNow(); index++ } }
+                    if (list.size > 1) RoundBtn(Icons.Filled.SkipNext, "Siguiente", 52) { nextIndex?.let { goTo(it) } }
                 }
 
                 // Barra inferior
@@ -393,7 +554,17 @@ fun VideoPlayerScreen(req: VideoRequest, onClose: () -> Unit) {
                             Icon(Icons.Filled.LockOpen, "Bloquear controles", tint = Color.White)
                         }
                         Spacer(Modifier.weight(1f))
-                        if (req.paths.size > 1) Text("${index + 1} de ${req.paths.size}", color = Color(0xCCFFFFFF), style = MaterialTheme.typography.labelSmall)
+                        IconButton(onClick = {
+                            shuffle = !shuffle
+                            val cur = path
+                            list = if (shuffle) PlayOrder.shuffled(baseList, baseList.indexOf(cur).coerceAtLeast(0)) else baseList
+                            index = list.indexOf(cur).coerceAtLeast(0)
+                            flash(if (shuffle) "Aleatorio" else "En orden")
+                        }) { Icon(Icons.Filled.Shuffle, "Aleatorio", tint = if (shuffle) Color(0xFF8CF0C8) else Color.White) }
+                        if (list.size > 1) Text("${index + 1} de ${list.size}", color = Color(0xCCFFFFFF), style = MaterialTheme.typography.labelSmall)
+                        IconButton(onClick = { repeat = !repeat; flash(if (repeat) "Repetir la cola" else "Sin repetir") }) {
+                            Icon(Icons.Filled.Repeat, "Repetir", tint = if (repeat) Color(0xFF8CF0C8) else Color.White)
+                        }
                         Spacer(Modifier.weight(1f))
                         IconButton(onClick = { resize = (resize + 1) % RESIZE_MODES.size; flash(RESIZE_MODES[resize].second) }) {
                             Icon(Icons.Filled.AspectRatio, "Ajuste de pantalla", tint = Color.White)

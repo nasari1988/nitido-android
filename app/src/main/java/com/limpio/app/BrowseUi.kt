@@ -36,6 +36,7 @@ import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.DriveFileMove
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.automirrored.filled.OpenInNew
+import androidx.compose.material.icons.automirrored.filled.PlaylistAdd
 import androidx.compose.material.icons.automirrored.filled.Sort
 import androidx.compose.material.icons.filled.Android
 import androidx.compose.material.icons.filled.Archive
@@ -153,7 +154,7 @@ fun BrowseTab(
         when (vm.screen) {
             Screen.Home -> HomeScreen(vm, cleanable, onClean)
             Screen.Music -> MusicLibraryScreen(music, onBack = { vm.back() })
-            else -> ListScreen(vm, snackbar, onMoveToVault)
+            else -> if (vm.audioReview) AudioReviewScreen(vm) else ListScreen(vm, snackbar, onMoveToVault)
         }
         if (vm.screen == Screen.Home) {
             SnackbarHost(snackbar, Modifier.align(Alignment.BottomCenter))
@@ -422,6 +423,8 @@ private fun ListScreen(vm: BrowseViewModel, snackbar: SnackbarHostState, onMoveT
     var newFolder by remember { mutableStateOf(false) }
     var renameTarget by remember { mutableStateOf<Entry?>(null) }
     var confirmDelete by remember { mutableStateOf(false) }
+    var addToList by remember { mutableStateOf<List<String>?>(null) }
+    val shown = vm.shownEntries()
 
     val title = when (s) {
         is Screen.Folder -> if (s.path == vm.root) "Almacenamiento interno" else File(s.path).name
@@ -458,6 +461,13 @@ private fun ListScreen(vm: BrowseViewModel, snackbar: SnackbarHostState, onMoveT
                                         MenuItem("Abrir con…", Icons.AutoMirrored.Filled.OpenInNew) { selMenu = false; vm.clearSelection(); FileOps.openWith(ctx, single.path) }
                                     }
                                     MenuItem("Copiar ruta", Icons.Filled.Link) { selMenu = false; vm.clearSelection(); FileOps.copyPath(ctx, single.path) }
+                                }
+                                if (sel.any { it.kind == FileKind.AUDIO || it.kind == FileKind.VIDEO }) {
+                                    MenuItem("Agregar a lista", Icons.AutoMirrored.Filled.PlaylistAdd) {
+                                        selMenu = false
+                                        addToList = sel.filter { it.kind == FileKind.AUDIO || it.kind == FileKind.VIDEO }.map { it.path }
+                                        vm.clearSelection()
+                                    }
                                 }
                                 MenuItem("Comprimir en ZIP", Icons.Filled.Archive) { selMenu = false; vm.compress() }
                                 MenuItem("Mover a carpeta segura", Icons.Filled.Lock) {
@@ -564,12 +574,18 @@ private fun ListScreen(vm: BrowseViewModel, snackbar: SnackbarHostState, onMoveT
             if (s is Screen.Folder) Breadcrumbs(vm, s.path)
             if (s == Screen.Search) SearchFilters(vm)
             if (vm.sizing) LinearProgressIndicator(Modifier.fillMaxWidth())
+            if (!selecting) AudioSummaryCard(vm)
             Box(Modifier.fillMaxSize()) {
                 when {
                     vm.loading && vm.entries.isEmpty() ->
                         CircularProgressIndicator(Modifier.align(Alignment.Center))
                     s == Screen.Search && vm.entries.isEmpty() && vm.query.trim().length < 2 && !vm.hasSearchFilters ->
                         RecentSearches(vm)
+                    shown.isEmpty() && vm.audioFilter != null -> Text(
+                        "Ningún video coincide con este filtro",
+                        modifier = Modifier.align(Alignment.Center).padding(24.dp),
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
                     vm.entries.isEmpty() -> Text(
                         when {
                             s == Screen.Search && vm.query.trim().length < 2 && !vm.hasSearchFilters -> "Escribe al menos 2 letras"
@@ -588,16 +604,17 @@ private fun ListScreen(vm: BrowseViewModel, snackbar: SnackbarHostState, onMoveT
                         verticalArrangement = Arrangement.spacedBy(10.dp),
                         modifier = Modifier.fillMaxSize()
                     ) {
-                        items(vm.entries, key = { it.path }) { e -> EntryTile(vm, e, selecting) }
+                        items(shown, key = { it.path }) { e -> EntryTile(vm, e, selecting) }
                     }
                     else -> LazyColumn(Modifier.fillMaxSize()) {
-                        items(vm.entries, key = { it.path }) { e -> EntryRow(vm, e, selecting, s !is Screen.Folder) }
+                        items(shown, key = { it.path }) { e -> EntryRow(vm, e, selecting, s !is Screen.Folder) }
                     }
                 }
             }
         }
     }
 
+    addToList?.let { p -> AddToPlaylistDialog(p) { addToList = null } }
     if (newFolder) {
         NameDialog("Nueva carpeta", "", onDismiss = { newFolder = false }) { newFolder = false; vm.newFolder(it) }
     }
@@ -812,6 +829,7 @@ private fun EntryRow(vm: BrowseViewModel, e: Entry, selecting: Boolean, showLoca
         Box {
             FileThumb(e.path, e.isDir, 48.dp)
             if (selected) SelectedBadge(Modifier.align(Alignment.TopEnd))
+            if (e.kind == FileKind.VIDEO) AudioBadge(AudioScan.states[e.path], Modifier.align(Alignment.BottomEnd), 16.dp)
         }
         Spacer(Modifier.width(14.dp))
         Column(Modifier.weight(1f)) {
@@ -854,6 +872,7 @@ private fun EntryTile(vm: BrowseViewModel, e: Entry, selecting: Boolean) {
         Box {
             FileThumb(e.path, e.isDir, modifier = Modifier.fillMaxWidth().aspectRatio(1f))
             if (selected) SelectedBadge(Modifier.align(Alignment.TopEnd).padding(4.dp))
+            if (e.kind == FileKind.VIDEO) AudioBadge(AudioScan.states[e.path], Modifier.align(Alignment.TopStart).padding(5.dp))
             if (e.isProtected) Icon(
                 Icons.Filled.Lock, null,
                 Modifier.align(Alignment.BottomEnd).padding(4.dp).size(16.dp),

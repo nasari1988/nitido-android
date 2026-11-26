@@ -31,6 +31,11 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.QueueMusic
+import androidx.compose.material.icons.filled.DragHandle
+import androidx.compose.material.icons.filled.Folder
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.foundation.gestures.detectVerticalDragGestures
 import androidx.compose.material.icons.filled.Bedtime
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.GraphicEq
@@ -83,7 +88,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.File
 
-enum class MusicTab(val label: String) { SONGS("Canciones"), ALBUMS("Álbumes"), ARTISTS("Artistas"), FOLDERS("Carpetas") }
+enum class MusicTab(val label: String) { SONGS("Canciones"), ALBUMS("Álbumes"), ARTISTS("Artistas"), FOLDERS("Carpetas"), LISTS("Listas") }
 
 class MusicViewModel(app: Application) : AndroidViewModel(app) {
     var tracks by mutableStateOf<List<Track>?>(null)
@@ -203,12 +208,16 @@ fun MusicLibraryScreen(vm: MusicViewModel, onBack: () -> Unit) {
                 }
             }
         }
+        if (group == null && vm.tab == MusicTab.LISTS) {
+            PlaylistsPane()
+            return@Column
+        }
         val songs = group?.tracks ?: all
         Row(
             Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            Button(onClick = { Music.play(ctx, songs, (songs.indices).random(), shuffled = true); Music.showNowPlaying = true }) {
+            Button(onClick = { Music.play(ctx, songs, (songs.indices).random(), shuffled = true, label = "Biblioteca · " + (group?.name ?: "Canciones")); Music.showNowPlaying = true }) {
                 Icon(Icons.Filled.Shuffle, null, Modifier.size(18.dp))
                 Spacer(Modifier.width(8.dp))
                 Text("Aleatorio")
@@ -251,7 +260,7 @@ fun MusicLibraryScreen(vm: MusicViewModel, onBack: () -> Unit) {
                     Row(
                         Modifier.fillMaxWidth().clip(RoundedCornerShape(14.dp))
                             .background(if (playing) MaterialTheme.colorScheme.primaryContainer else androidx.compose.ui.graphics.Color.Transparent)
-                            .clickable { Music.play(ctx, songs, i) }
+                            .clickable { Music.play(ctx, songs, i, label = "Biblioteca · " + (group?.name ?: "Canciones")) }
                             .padding(8.dp),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
@@ -400,29 +409,7 @@ fun NowPlayingScreen() {
             Spacer(Modifier.height(12.dp))
         }
     }
-    if (showQueue) {
-        AlertDialog(
-            onDismissRequest = { showQueue = false },
-            title = { Text("Cola de reproducción") },
-            text = {
-                LazyColumn(Modifier.height(380.dp)) {
-                    itemsIndexed(Music.queue, key = { i, t -> "$i${t.path}" }) { i, t ->
-                        Row(
-                            Modifier.fillMaxWidth().clip(RoundedCornerShape(10.dp)).clickable { Music.playAt(i); showQueue = false }.padding(8.dp),
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Text(
-                                t.title, modifier = Modifier.weight(1f), maxLines = 1, overflow = TextOverflow.Ellipsis,
-                                color = if (t.path == Music.currentPath) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface,
-                                fontWeight = if (t.path == Music.currentPath) FontWeight.SemiBold else FontWeight.Normal
-                            )
-                        }
-                    }
-                }
-            },
-            confirmButton = { TextButton(onClick = { showQueue = false }) { Text("Cerrar") } }
-        )
-    }
+    if (showQueue) QueueSheet(onDismiss = { showQueue = false })
 }
 
 @Composable
@@ -434,4 +421,105 @@ private fun NpAction(icon: androidx.compose.ui.graphics.vector.ImageVector, labe
         Icon(icon, label)
         Text(label, style = MaterialTheme.typography.labelSmall)
     }
+}
+
+/** Cola: origen (Carpeta o Lista), seguir con la siguiente, y "A continuación" reordenable arrastrando. */
+@OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
+@Composable
+private fun QueueSheet(onDismiss: () -> Unit) {
+    val ctx = LocalContext.current
+    var listMenu by remember { mutableStateOf(false) }
+    var addToList by remember { mutableStateOf(false) }
+    val density = androidx.compose.ui.platform.LocalDensity.current
+    val rowPx = with(density) { 60.dp.toPx() }
+    @Suppress("UNUSED_VARIABLE") val v = Music.queueVersion + (Music.currentPath?.hashCode() ?: 0) + if (Music.shuffle) 1 else 0
+    val upcoming = remember(v) { Music.upcoming() }
+    val fromList = Music.source.startsWith("Lista")
+    androidx.compose.material3.ModalBottomSheet(onDismissRequest = onDismiss) {
+        Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp).navigationBarsPadding()) {
+            Text("Reproducir desde", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.padding(vertical = 6.dp)) {
+                FilterChip(
+                    selected = !fromList,
+                    onClick = { Music.currentPath?.let { Music.playFolder(ctx, it.substringBeforeLast('/'), it) } },
+                    label = { Text("Carpeta") },
+                    leadingIcon = { Icon(Icons.Filled.Folder, null, Modifier.size(18.dp)) }
+                )
+                Box {
+                    FilterChip(
+                        selected = fromList, onClick = { listMenu = true },
+                        label = { Text("Lista ▾") },
+                        leadingIcon = { Icon(Icons.AutoMirrored.Filled.QueueMusic, null, Modifier.size(18.dp)) }
+                    )
+                    DropdownMenu(expanded = listMenu, onDismissRequest = { listMenu = false }) {
+                        val lists = Playlists.all().filter { it.audio.isNotEmpty() }
+                        if (lists.isEmpty()) DropdownMenuItem(text = { Text("No hay listas con canciones") }, onClick = { listMenu = false })
+                        lists.forEach { p ->
+                            DropdownMenuItem(text = { Text("${p.name} (${p.audio.size})") }, onClick = {
+                                listMenu = false
+                                Playlists.play(ctx, p, videos = false, start = Music.currentPath?.takeIf { it in p.audio })
+                            })
+                        }
+                    }
+                }
+            }
+            Text(Music.source, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(vertical = 4.dp)) {
+                Text("Al terminar una, seguir con la siguiente", modifier = Modifier.weight(1f))
+                androidx.compose.material3.Switch(checked = PlayPrefs.musicAutoNext, onCheckedChange = { PlayPrefs.musicAutoNext = it; PlayPrefs.save() })
+            }
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text("A continuación", style = MaterialTheme.typography.titleSmall, modifier = Modifier.weight(1f))
+                TextButton(onClick = { addToList = true }) { Text("Agregar a lista") }
+            }
+            if (Music.shuffle) Text(
+                "Con aleatorio activo el orden no se puede cambiar.",
+                style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            val seen = HashMap<String, Int>()
+            val keyed = upcoming.map { (i, t) -> val n = seen.merge(t.path, 1, Int::plus)!!; Triple("${t.path}#$n", i, t) }
+            LazyColumn(Modifier.fillMaxWidth().height(420.dp)) {
+                itemsIndexed(keyed, key = { _, k -> k.first }) { pos, (_, qi, t) ->
+                    val current = pos == 0
+                    val qIndex by androidx.compose.runtime.rememberUpdatedState(qi)
+                    var drag by remember { mutableStateOf(0f) }
+                    Row(
+                        Modifier.fillMaxWidth().height(60.dp)
+                            .graphicsLayer { translationY = drag }
+                            .clip(RoundedCornerShape(12.dp))
+                            .background(if (current) MaterialTheme.colorScheme.primaryContainer else androidx.compose.ui.graphics.Color.Transparent)
+                            .clickable { Music.playAt(qi) }
+                            .padding(horizontal = 8.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Artwork(t.path, Modifier.size(42.dp))
+                        Spacer(Modifier.width(10.dp))
+                        Column(Modifier.weight(1f)) {
+                            Text((if (current) "Sonando · " else "") + t.title, maxLines = 1, overflow = TextOverflow.Ellipsis,
+                                fontWeight = if (current) FontWeight.SemiBold else FontWeight.Normal)
+                            if (t.artist.isNotBlank()) Text(t.artist, maxLines = 1, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        }
+                        if (!current && !Music.shuffle) Icon(
+                            Icons.Filled.DragHandle, "Arrastra para ordenar",
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.size(40.dp).padding(8.dp).pointerInput(Unit) {
+                                detectVerticalDragGestures(
+                                    onDragEnd = { drag = 0f }, onDragCancel = { drag = 0f },
+                                    onVerticalDrag = { ch, dy ->
+                                        ch.consume()
+                                        drag += dy
+                                        val cur = Music.controller?.currentMediaItemIndex ?: -1
+                                        val count = Music.controller?.mediaItemCount ?: 0
+                                        if (drag > rowPx * 0.6f && qIndex + 1 < count) { Music.move(qIndex, qIndex + 1); drag -= rowPx }
+                                        else if (drag < -rowPx * 0.6f && qIndex - 1 > cur) { Music.move(qIndex, qIndex - 1); drag += rowPx }
+                                    }
+                                )
+                            }
+                        )
+                    }
+                }
+            }
+        }
+    }
+    if (addToList) Music.currentPath?.let { AddToPlaylistDialog(listOf(it)) { addToList = false } } ?: run { addToList = false }
 }

@@ -185,7 +185,7 @@ class BrowseViewModel(app: Application) : AndroidViewModel(app) {
         private set
     var gridKeys by mutableStateOf(prefs.getStringSet("grid", setOf("IMAGES", "VIDEOS"))!!.toSet())
         private set
-    var favorites by mutableStateOf(prefs.getStringSet("favs", emptySet())!!.toSet())
+    var favorites by mutableStateOf(prefs.getStringSet("favs", emptySet())!!.toSet().also { Playlists.favoritePaths = it })
         private set
 
     var selection by mutableStateOf<Set<String>>(emptySet())
@@ -239,6 +239,11 @@ class BrowseViewModel(app: Application) : AndroidViewModel(app) {
     var sizing by mutableStateOf(false)
         private set
     var details by mutableStateOf<Details?>(null)
+    /** Filtro de audio en videos (null = todos). */
+    var audioFilter by mutableStateOf<AudioState?>(null)
+    /** Pantalla de revisión de videos sin audio. */
+    var audioReview by mutableStateOf(false)
+    var audioSelection by mutableStateOf<Set<String>>(emptySet())
     var zipPrompt by mutableStateOf<Entry?>(null)
     var viewer by mutableStateOf<List<Entry>?>(null)
         private set
@@ -290,6 +295,8 @@ class BrowseViewModel(app: Application) : AndroidViewModel(app) {
 
     private fun onScreenChanged() {
         selection = emptySet()
+        audioFilter = null
+        audioReview = false
         sizeJob?.cancel()
         sizing = false
         folderSizes = emptyMap()
@@ -347,6 +354,8 @@ class BrowseViewModel(app: Application) : AndroidViewModel(app) {
             if (s == screen) {
                 entries = if (s is Screen.Cat && s.cat == BrowseCategory.RECENT) list else sorted(list)
                 loading = false
+                val vids = list.filter { it.kind == FileKind.VIDEO }.map { it.path }
+                if (vids.isNotEmpty()) AudioScan.start(ctx, vids)
             }
         }
     }
@@ -435,8 +444,13 @@ class BrowseViewModel(app: Application) : AndroidViewModel(app) {
                 Music.showNowPlaying = true
             }
             e.kind == FileKind.VIDEO -> {
-                val vids = entries.filter { it.kind == FileKind.VIDEO }.map { it.path }
-                Playback.playVideo(vids, vids.indexOf(e.path).coerceAtLeast(0))
+                val vids = shownEntries().filter { it.kind == FileKind.VIDEO }.map { it.path }
+                val label = when (val s = screen) {
+                    is Screen.Folder -> "Carpeta: " + File(s.path).name
+                    is Screen.Cat -> s.cat.label
+                    else -> null
+                }
+                Playback.playVideo(vids, vids.indexOf(e.path).coerceAtLeast(0), label)
             }
             e.isViewable -> {
                 val list = entries.filter { it.isViewable }
@@ -470,7 +484,7 @@ class BrowseViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     fun selectAll() {
-        selection = entries.filterNot { it.isProtected }.map { it.path }.toSet()
+        selection = shownEntries().filterNot { it.isProtected }.map { it.path }.toSet()
     }
 
     fun clearSelection() {
@@ -478,6 +492,29 @@ class BrowseViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     fun selectedEntries(): List<Entry> = entries.filter { it.path in selection }
+
+    /** Lo que se muestra con el filtro de audio aplicado. */
+    fun shownEntries(): List<Entry> {
+        val f = audioFilter ?: return entries
+        return entries.filter { it.kind == FileKind.VIDEO && AudioScan.states[it.path] == f }
+    }
+
+    /** Videos sin pista de audio o con audio en silencio de la vista actual. */
+    fun mutedVideos(): List<Entry> = entries.filter {
+        it.kind == FileKind.VIDEO && AudioScan.states[it.path].let { s -> s == AudioState.NONE || s == AudioState.SILENT }
+    }
+
+    fun openAudioReview() {
+        audioSelection = mutedVideos().map { it.path }.toSet()
+        audioReview = true
+    }
+
+    fun deleteMuted(paths: List<String>) {
+        audioReview = false
+        audioSelection = emptySet()
+        AudioScan.forget(paths)
+        delete(paths)
+    }
 
     // ---------- Acciones ----------
 
@@ -579,6 +616,7 @@ class BrowseViewModel(app: Application) : AndroidViewModel(app) {
 
     private fun saveFavorites(f: Set<String>) {
         favorites = f
+        Playlists.favoritePaths = f
         prefs.edit().putStringSet("favs", f).apply()
     }
 

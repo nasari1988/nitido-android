@@ -191,7 +191,7 @@ fun ArchivosApp(
     apps: AppsViewModel,
 ) {
     val ctx = LocalContext.current
-    LaunchedEffect(Unit) { Music.connect(ctx) }
+    LaunchedEffect(Unit) { PlayPrefs.load(ctx); Playlists.load(ctx); Music.connect(ctx) }
     var tab by rememberSaveable { mutableIntStateOf(0) }
     var tool by rememberSaveable { mutableStateOf<String?>(null) }
     val nav = listOf(
