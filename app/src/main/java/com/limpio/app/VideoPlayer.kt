@@ -102,7 +102,9 @@ import androidx.media3.common.util.UnstableApi
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.ui.AspectRatioFrameLayout
 import androidx.media3.ui.PlayerView
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.withContext
 import java.io.File
 
 fun Context.findActivity(): Activity? {
@@ -179,11 +181,21 @@ fun VideoPlayerScreen(req: VideoRequest, onClose: () -> Unit) {
     var landscape by remember { mutableStateOf<Boolean?>(null) }
 
     fun flash(text: String) { hint = text; hintAt = System.currentTimeMillis() }
-    fun saveNow() = VideoPositions.save(ctx, path, player.currentPosition, player.duration)
+    // Siempre el video que suena ahora (no el de cuando se creó la función).
+    fun saveNow() {
+        val cur = list.getOrNull(player.currentMediaItemIndex) ?: return
+        VideoPositions.save(ctx, cur, player.currentPosition, player.duration)
+    }
     fun goTo(i: Int) {
-        if (i !in list.indices) return
+        if (i !in list.indices || i >= player.mediaItemCount) return
         countdown = null
-        if (i != index) { saveNow(); index = i } else { player.seekTo(0); player.play() }
+        if (i != player.currentMediaItemIndex) {
+            saveNow()
+            val saved = VideoPositions.get(ctx, list[i])
+            player.seekTo(i, saved)
+            resumedFrom = saved
+        } else player.seekTo(0)
+        player.play()
     }
     fun setQueue(paths: List<String>, label: String) {
         if (paths.isEmpty()) return
@@ -199,24 +211,33 @@ fun VideoPlayerScreen(req: VideoRequest, onClose: () -> Unit) {
         .filter { it.isFile && FileTypes.kindOf(it.name) == FileKind.VIDEO }
         .sortedBy { it.name.lowercase() }.map { it.absolutePath }
     val nextIndex = PlayOrder.next(index, list.size, repeat)
-    // Al terminar: cuenta de 5 s y sigue con el siguiente (o cierra si no hay más).
-    val onEnded = androidx.compose.runtime.rememberUpdatedState {
-        VideoPositions.save(ctx, path, 0, 0)
+    // Al terminar uno: cierra si no hay más; si hay espera o el automático está apagado, el
+    // reproductor se detiene al final y aquí se decide (cuenta atrás o mostrar controles).
+    val onItemEnd = androidx.compose.runtime.rememberUpdatedState {
+        list.getOrNull(player.currentMediaItemIndex)?.let { VideoPositions.save(ctx, it, 0, 0) }
         when {
             nextIndex == null -> onClose()
-            PlayPrefs.videoAutoplay -> countdown = 5
+            PlayPrefs.videoAutoplay && PlayPrefs.videoWait > 0 -> countdown = PlayPrefs.videoWait
+            PlayPrefs.videoAutoplay -> { player.seekToNextMediaItem(); player.play() }
             else -> controls = true
         }
     }
 
-    // Cargar el video (y retomar donde te quedaste).
-    LaunchedEffect(path) {
-        player.setMediaItem(videoItem(path))
+    // Toda la cola va al reproductor: así precarga el siguiente y pasa sin corte.
+    LaunchedEffect(list) {
+        val cur = list.getOrNull(index) ?: return@LaunchedEffect
+        val samePlaying = player.currentMediaItem?.mediaId == cur && player.mediaItemCount > 0
+        val pos = if (samePlaying) player.currentPosition else VideoPositions.get(ctx, cur)
+        val items = withContext(Dispatchers.IO) { list.map { videoItem(it) } }
+        player.setMediaItems(items, index, pos)
         player.prepare()
-        val saved = VideoPositions.get(ctx, path)
-        resumedFrom = saved
-        if (saved > 0) player.seekTo(saved)
+        if (!samePlaying) resumedFrom = pos
         player.playWhenReady = true
+    }
+    // Pausa al final de cada video solo cuando hace falta esperar o preguntar.
+    LaunchedEffect(PlayPrefs.videoAutoplay, PlayPrefs.videoWait, repeat) {
+        player.pauseAtEndOfMediaItems = !PlayPrefs.videoAutoplay || PlayPrefs.videoWait > 0
+        player.repeatMode = if (repeat) Player.REPEAT_MODE_ALL else Player.REPEAT_MODE_OFF
     }
 
     DisposableEffect(Unit) {
@@ -226,7 +247,22 @@ fun VideoPlayerScreen(req: VideoRequest, onClose: () -> Unit) {
                 hasSubs = p.currentTracks.containsType(C.TRACK_TYPE_TEXT)
             }
             override fun onPlaybackStateChanged(state: Int) {
-                if (state == Player.STATE_ENDED) onEnded.value()
+                if (state == Player.STATE_ENDED) onItemEnd.value()
+            }
+            override fun onPlayWhenReadyChanged(playWhenReady: Boolean, reason: Int) {
+                if (!playWhenReady && reason == Player.PLAY_WHEN_READY_CHANGE_REASON_END_OF_MEDIA_ITEM) onItemEnd.value()
+            }
+            override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
+                // El índice de la pantalla sigue al reproductor (siguiente automático, gestos, etc.).
+                val i = player.currentMediaItemIndex
+                if (i in list.indices && i != index) {
+                    if (reason == Player.MEDIA_ITEM_TRANSITION_REASON_AUTO) {
+                        list.getOrNull(index)?.let { VideoPositions.save(ctx, it, 0, 0) }
+                        resumedFrom = 0
+                    }
+                    index = i
+                    countdown = null
+                }
             }
             override fun onVideoSizeChanged(size: androidx.media3.common.VideoSize) {
                 // Gira solo la pantalla para videos horizontales (la primera vez).
@@ -247,7 +283,7 @@ fun VideoPlayerScreen(req: VideoRequest, onClose: () -> Unit) {
         val pipListener = Consumer<androidx.core.app.PictureInPictureModeChangedInfo> { inPip = it.isInPictureInPictureMode }
         (activity as? ComponentActivity)?.addOnPictureInPictureModeChangedListener(pipListener)
         onDispose {
-            VideoPositions.save(ctx, list.getOrNull(index) ?: path, player.currentPosition, player.duration)
+            saveNow()
             player.removeListener(listener)
             player.release()
             (activity as? ComponentActivity)?.removeOnPictureInPictureModeChangedListener(pipListener)
@@ -276,7 +312,7 @@ fun VideoPlayerScreen(req: VideoRequest, onClose: () -> Unit) {
     LaunchedEffect(countdown) {
         val c = countdown ?: return@LaunchedEffect
         if (c > 0) { delay(1000); if (countdown == c) countdown = c - 1 }
-        else { countdown = null; nextIndex?.let { goTo(it) } }
+        else { countdown = null; player.seekToNextMediaItem(); player.play() }
     }
     LaunchedEffect(resumedFrom) { if (resumedFrom > 0) { delay(5000); resumedFrom = 0 } }
 
@@ -395,6 +431,22 @@ fun VideoPlayerScreen(req: VideoRequest, onClose: () -> Unit) {
                 Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(vertical = 4.dp)) {
                     Text("Reproducir el siguiente al terminar", color = Color.White, style = MaterialTheme.typography.bodySmall, modifier = Modifier.weight(1f))
                     Switch(checked = PlayPrefs.videoAutoplay, onCheckedChange = { PlayPrefs.videoAutoplay = it; PlayPrefs.save() })
+                }
+                if (PlayPrefs.videoAutoplay) {
+                    Text("Espera entre videos", color = Color(0xAAFFFFFF), style = MaterialTheme.typography.labelSmall)
+                    Row(horizontalArrangement = Arrangement.spacedBy(6.dp), modifier = Modifier.padding(vertical = 4.dp)) {
+                        listOf(0 to "Sin espera", 3 to "3 s", 5 to "5 s", 10 to "10 s").forEach { (s, l) ->
+                            val on = PlayPrefs.videoWait == s
+                            Text(
+                                l, style = MaterialTheme.typography.labelMedium,
+                                color = if (on) Color.Black else Color.White,
+                                modifier = Modifier.clip(RoundedCornerShape(50))
+                                    .background(if (on) Color(0xFF8CF0C8) else Color(0x33FFFFFF))
+                                    .clickable { PlayPrefs.videoWait = s; PlayPrefs.save() }
+                                    .padding(horizontal = 10.dp, vertical = 6.dp)
+                            )
+                        }
+                    }
                 }
                 LazyColumn(Modifier.weight(1f)) {
                     itemsIndexed(list, key = { i, p -> "$i|$p" }) { i, p ->

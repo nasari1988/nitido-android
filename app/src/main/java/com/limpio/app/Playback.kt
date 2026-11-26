@@ -72,6 +72,8 @@ class PlaybackService : MediaSessionService() {
 /** Preferencias de reproducción. */
 object PlayPrefs {
     var videoAutoplay by mutableStateOf(true)
+    /** Segundos de espera entre videos (0 = sin espera). */
+    var videoWait by mutableStateOf(0)
     var musicAutoNext by mutableStateOf(true)
     private var ctx: Context? = null
 
@@ -79,12 +81,13 @@ object PlayPrefs {
         ctx = c.applicationContext
         val p = c.getSharedPreferences("reproduccion", Context.MODE_PRIVATE)
         videoAutoplay = p.getBoolean("videoAutoplay", true)
+        videoWait = p.getInt("videoWait", 0)
         musicAutoNext = p.getBoolean("musicAutoNext", true)
     }
 
     fun save() {
         ctx?.getSharedPreferences("reproduccion", Context.MODE_PRIVATE)?.edit()
-            ?.putBoolean("videoAutoplay", videoAutoplay)?.putBoolean("musicAutoNext", musicAutoNext)?.apply()
+            ?.putBoolean("videoAutoplay", videoAutoplay)?.putBoolean("musicAutoNext", musicAutoNext)?.putInt("videoWait", videoWait)?.apply()
     }
 }
 

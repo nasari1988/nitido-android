@@ -91,7 +91,7 @@ class SelfTestViewModel(app: Application) : AndroidViewModel(app) {
 
     private val ctx: Context get() = getApplication()
     private val sandbox = File(Protection.rootPath, "Download/ArchivosAutoprueba")
-    val total = 30
+    val total = 31
 
     fun run() {
         if (running) return
@@ -303,6 +303,40 @@ class SelfTestViewModel(app: Application) : AndroidViewModel(app) {
                     val w = p.videoFormat?.width ?: 0
                     val h = p.videoFormat?.height ?: 0
                     check(ready && w > 0, "Preparado ${w}×$h (solo lectura, sin sonido)", "No se pudo preparar ${v.name}")
+                } finally { p.release() }
+            }
+        }
+
+        test("Video: pasar al siguiente sin pausa") {
+            val a = File(sandbox, "cola1.wav").also { writeTone(it, 1) }
+            val b = File(sandbox, "cola2.wav").also { writeTone(it, 1) }
+            withContext(Dispatchers.Main) {
+                val p = ExoPlayer.Builder(ctx).build()
+                try {
+                    p.volume = 0f
+                    p.setMediaItems(listOf(videoItem(a.absolutePath), videoItem(b.absolutePath)))
+                    p.pauseAtEndOfMediaItems = false
+                    p.prepare()
+                    if (!awaitReady(p)) return@withContext fail("No se pudo preparar la cola")
+                    val t0 = System.currentTimeMillis()
+                    p.play()
+                    val moved = withTimeoutOrNull(6_000) {
+                        suspendCancellableCoroutine<Long> { c ->
+                            p.addListener(object : Player.Listener {
+                                override fun onMediaItemTransition(mediaItem: androidx.media3.common.MediaItem?, reason: Int) {
+                                    if (reason == Player.MEDIA_ITEM_TRANSITION_REASON_AUTO && c.isActive) {
+                                        p.removeListener(this); c.resume(System.currentTimeMillis() - t0)
+                                    }
+                                }
+                            })
+                        }
+                    }
+                    val gap = moved?.let { it - 1000 }
+                    check(
+                        moved != null && gap!! < 1200 && p.isPlaying,
+                        "Pasó solo al siguiente (corte de ${gap?.coerceAtLeast(0)} ms)",
+                        if (moved == null) "No pasó al siguiente" else "Tardó $gap ms en pasar"
+                    )
                 } finally { p.release() }
             }
         }
