@@ -40,6 +40,28 @@ if [ ! -s modelos_base/selfie_multiclass.tflite ]; then
     "https://storage.googleapis.com/mediapipe-models/image_segmenter/selfie_multiclass_256x256/float32/latest/selfie_multiclass_256x256.tflite"
 fi
 
+echo "== Librería de ventanas que pide Qt"
+if ! ldconfig -p 2>/dev/null | grep -q libxcb-cursor.so.0; then
+  echo "Falta libxcb-cursor0 (la app no abriría su ventana). Instálala con:"
+  echo "    sudo apt install libxcb-cursor0"
+fi
+
+echo "== Ícono en el menú de aplicaciones"
+AQUI="$(pwd)"
+mkdir -p "$HOME/.local/share/applications"
+cat > "$HOME/.local/share/applications/nitido-entrenador.desktop" <<DESK
+[Desktop Entry]
+Type=Application
+Name=Nítido · Entrenador
+Comment=Entrena Mi estilo y Mi retoque de piel para Nítido
+Exec=bash "$AQUI/entrenar.sh"
+Path=$AQUI
+Icon=$AQUI/icono.png
+Terminal=false
+Categories=Graphics;Photography;
+DESK
+echo "Listo: busca «Nítido · Entrenador» en tus aplicaciones."
+
 echo "== Prueba rápida"
 python - <<'PY'
 import torch
@@ -47,4 +69,4 @@ ok = torch.cuda.is_available()
 print("PyTorch", torch.__version__, "· tarjeta:", torch.cuda.get_device_name(0) if ok else "no (se usará el procesador)")
 PY
 echo
-echo "Listo. Para abrir el entrenador:  bash entrenar.sh"
+echo "Listo. Abre «Nítido · Entrenador» desde tus aplicaciones, o en la terminal:  bash entrenar.sh"

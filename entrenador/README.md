@@ -5,7 +5,7 @@ Entrena en tu PC tus propios modelos para Nítido:
 - **Mi estilo**: aprende tu color, luz y contraste a partir de tus fotos editadas. Pesa menos de 3 MB.
 - **Mi retoque de piel**: aprende tu retoque natural de piel (granos, manchas, rojeces; deja poros y textura) en toda la piel del cuerpo. Pesa unos 23 MB.
 
-Todo corre en tu PC. **Tus fotos nunca salen de ella**: la página del entrenador solo se abre en tu propio equipo (`127.0.0.1`), y al exportar solo se crea el archivo del modelo.
+Es una app de escritorio (Python + Qt, en su propio entorno virtual). Todo corre en tu PC. **Tus fotos nunca salen de ella**: la app no abre ningún puerto ni se conecta a internet, y al exportar solo se crea el archivo del modelo.
 
 ## 1. Instalar (una sola vez)
 
@@ -18,23 +18,28 @@ Probado para Pop!_OS con una GTX 1650 (4 GB).
    y reinicia.
 2. Herramientas de Python:
    ```bash
-   sudo apt install python3-venv python3-pip curl
+   sudo apt install python3-venv python3-pip curl libxcb-cursor0
    ```
 3. Desde esta carpeta:
    ```bash
    bash instalar.sh
    ```
-   Crea un entorno virtual en `.venv` (no toca el Python del sistema) e instala PyTorch con CUDA, MediaPipe (para encontrar la piel) y ONNX. Al final te dice si encontró tu tarjeta.
+   Crea un entorno virtual en `.venv` (no toca el Python del sistema) e instala PyTorch con CUDA, Qt (PySide6, para la ventana), OpenCV (para alinear tus pares), MediaPipe (para encontrar la piel) y ONNX. También pone «Nítido · Entrenador» en tu menú de aplicaciones. Al final te dice si encontró tu tarjeta.
 
-Para desinstalar todo basta con borrar la carpeta `.venv`.
+Para desinstalar todo basta con borrar la carpeta `.venv` y `~/.local/share/applications/nitido-entrenador.desktop`.
 
 ## 2. Abrir el entrenador
+
+Búscalo en tus aplicaciones como **Nítido · Entrenador**, o desde esta carpeta:
 
 ```bash
 bash entrenar.sh
 ```
 
-Se abre en tu navegador en `http://127.0.0.1:8765`. Para cerrarlo usa `Ctrl+C` en la terminal. Si estaba entrenando, la próxima vez sigue desde la última vuelta guardada.
+- Elige las carpetas con el botón **Elegir…**.
+- Si cierras la app mientras entrena, te pregunta antes; se guarda la última vuelta completa y la próxima vez sigue desde ahí.
+- Puedes cambiar entre **Mi estilo** y **Mi piel** mientras uno entrena (solo uno entrena a la vez).
+- ¿Prefieres la versión en el navegador? `bash entrenar.sh --web` la abre en `http://127.0.0.1:8765` (solo en esta PC).
 
 ## 3. Tus pares
 
@@ -47,7 +52,11 @@ Prepara dos carpetas con fotos del **mismo nombre**:
 
 - **Mi estilo**: 100–300 pares variados (de día, de noche, interior, exterior, personas, paisajes).
 - **Mi retoque de piel**: fotos donde se vea piel (cara y cuerpo) retocada a tu gusto. De cada foto salen varias piezas de 512 px; con 100–300 fotos ya hay más de mil piezas.
-- No recortes ni enderezes la edición: el «después» debe tener el mismo encuadre que el «antes». La página avisa si un par está desalineado o tiene otra forma y lo excluye; puedes volver a incluirlo con un toque.
+- **Se alinean solos.** Al darle **Revisar**, cada par se acomoda automáticamente: se buscan miles de puntos que coinciden en las dos fotos y se corrige si en tu edición recortaste, enderezaste (giraste) o moviste la foto. Bajo cada par verás qué se corrigió (por ejemplo «alineado: girado −1.5°, recortado 6 %»).
+  - Lo que se acomoda es el «antes»; tu edición no se toca, para que el modelo aprenda de ella tal cual.
+  - Las fotos alineadas se guardan en `proyectos/<modelo>/alineados/`; tus originales no cambian. La segunda vez que revisas, los pares ya alineados no se repiten.
+  - Si no encuentra suficientes puntos (la foto es otra, o la edición la cambió demasiado), avisa y excluye el par; puedes volver a incluirlo con un clic.
+  - No corrige deformaciones de perspectiva ni de lente, ni fotos volteadas.
 - Las fotos deben ser tuyas o de personas que te dieron permiso.
 
 ## 4. Ampliar pares
@@ -87,5 +96,6 @@ El siguiente paso, mandar el modelo al teléfono y convertirlo para la NPU, se a
 
 - **«CUDA out of memory»**: en `proyectos/piel/proyecto.json` agrega `"config": {"piel": {"lote": 2}}` y vuelve a empezar la vuelta.
 - **«No encontré piel»**: revisa que exista `modelos_base/selfie_multiclass.tflite` (lo baja `instalar.sh`). Si no está, se usa el color de piel, que es menos preciso.
-- **El navegador no se abre solo**: abre `http://127.0.0.1:8765` a mano.
-- **Otro puerto**: `bash entrenar.sh --puerto 9000`.
+- **La ventana no abre y dice «xcb»**: `sudo apt install libxcb-cursor0`.
+- **Ver qué pasa por dentro**: abre la app desde la terminal (`bash entrenar.sh`); ahí se ven los mensajes y errores.
+- **Versión en navegador**: si el navegador no se abre solo, ve a `http://127.0.0.1:8765`; otro puerto con `bash entrenar.sh --web --puerto 9000`.

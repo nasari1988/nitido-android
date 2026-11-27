@@ -169,8 +169,15 @@ class Entrenamiento:
         v0 = 0
         if os.path.exists(ck):
             s = torch.load(ck, map_location=dev, weights_only=True)
-            red.load_state_dict(s["red"]); opt.load_state_dict(s["opt"]); sched.load_state_dict(s["sched"])
-            v0 = int(s["vuelta"]); self.estado["perdida"] = s.get("perdida", []); self.estado["prueba"] = s.get("prueba", [])
+            red.load_state_dict(s["red"]); opt.load_state_dict(s["opt"])
+            v0 = int(s["vuelta"])
+            if s["sched"].get("total_steps") == total:
+                sched.load_state_dict(s["sched"])
+            else:
+                # cambiaron las vueltas o los pares: un ciclo nuevo y más suave solo para lo que falta
+                sched = torch.optim.lr_scheduler.OneCycleLR(opt, max_lr=cfg["lr"] * 0.3, pct_start=0.05,
+                                                            total_steps=max(1, (cfg["vueltas"] - v0) * len(dl)))
+            self.estado["perdida"] = s.get("perdida", []); self.estado["prueba"] = s.get("prueba", [])
             self.estado["mejor"] = s.get("mejor")
             self._msg(f"Sigo desde la vuelta {v0}")
         self.estado.update(fase="entrenando", vueltas=cfg["vueltas"], pasos=len(dl))

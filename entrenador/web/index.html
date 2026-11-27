@@ -76,10 +76,10 @@ function pares() {
   ${ps.length ? `<div class="row"><b style="color:var(--acc)">${ok} pares listos</b><span style="color:var(--warn)">${avisos ? "· " + avisos + " con aviso" : ""}${(P.sin_pareja || []).length ? " · " + P.sin_pareja.length + " sin pareja" : ""}</span><span class="muted">· toca un par para usarlo o excluirlo</span></div>
   <div class="grid">${ps.map(p => `<div class="pair ${p.usar === false ? "off" : ""} ${p.avisos && p.avisos.length ? "warn" : ""}" data-n="${esc(p.nombre)}">
     <img loading="lazy" src="/mini?f=${encodeURIComponent(p.antes)}&lado=200" alt=""><img loading="lazy" src="/mini?f=${encodeURIComponent(p.despues)}&lado=200" alt="">
-    <div>${esc(p.nombre)}${p.avisos && p.avisos.length ? " · " + esc(p.avisos.join(", ")) : ""}${p.usar === false ? " · excluido" : ""}</div></div>`).join("")}</div>
+    <div>${esc(p.nombre)}${p.avisos && p.avisos.length ? " · " + esc(p.avisos.join(", ")) : (p.nota && p.nota !== "ya estaba alineado" ? " · " + esc(p.nota) : "")}${p.usar === false ? " · excluido" : ""}</div></div>`).join("")}</div>
   <div class="row" style="justify-content:flex-end"><button class="main" onclick="document.querySelector('[data-s=\\'2\\']').click()">Siguiente: ampliar pares ›</button></div>` : ""}`
   $("#revisar").onclick = async () => {
-    $("#msg").textContent = "Revisando… (puede tardar con muchas fotos)"
+    $("#msg").textContent = "Revisando y alineando… (puede tardar con muchas fotos)"
     try { P = await api("/api/pares", { antes: $("#antes").value.trim(), despues: $("#despues").value.trim() }); pintar() } catch (e) { $("#msg").innerHTML = `<span class="err">${esc(e.message)}</span>` }
   }
   document.querySelectorAll(".pair").forEach(el => el.onclick = async () => {

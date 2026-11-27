@@ -41,16 +41,38 @@ def _gris(im, n=64):
     return a / (np.linalg.norm(a) + 1e-6)
 
 
-def emparejar(antes, despues):
-    """Los pares por nombre de archivo, con avisos: sin pareja, tamaño distinto, desalineado."""
+def emparejar(antes, despues, alineados=None, avance=None):
+    """Los pares por nombre de archivo, con avisos: sin pareja, forma distinta, desalineado.
+    Con [alineados] (una carpeta) y OpenCV instalado, cada par se alinea solo antes de revisarlo:
+    las fotos alineadas se guardan ahí y el par las usa; tus originales no cambian."""
+    from . import alinear
     a, d = listar(antes), listar(despues)
     pares, sin = [], sorted(set(a) ^ set(d))
-    for nombre in sorted(set(a) & set(d)):
-        p = {"nombre": nombre, "antes": a[nombre], "despues": d[nombre], "avisos": [], "usar": True}
+    nombres = sorted(set(a) & set(d))
+    cache = alinear.Cache(alineados) if alineados and alinear.disponible() else None
+    for i, nombre in enumerate(nombres):
+        if avance:
+            avance(i, len(nombres))
+        p = {"nombre": nombre, "antes": a[nombre], "despues": d[nombre], "avisos": [], "usar": True,
+             "original_antes": a[nombre], "original_despues": d[nombre]}
         try:
-            ia, idd = abrir(a[nombre], 512), abrir(d[nombre], 512)
-            wa, ha = Image.open(a[nombre]).size
-            wd, hd = Image.open(d[nombre]).size
+            if cache is not None:
+                r = cache.get(a[nombre], d[nombre])
+                if r is None:
+                    try:
+                        r = alinear.alinear_par(a[nombre], d[nombre], alineados, nombre, abrir)
+                    except Exception as e:  # noqa: BLE001
+                        r = {"error": str(e)}
+                    cache.put(a[nombre], d[nombre], r)
+                if r.get("error"):
+                    p["avisos"].append("no se pudo alinear: " + r["error"])
+                else:
+                    p["antes"], p["despues"] = r["antes"], r["despues"]
+                    p["nota"] = "alineado: " + r["nota"] if not r.get("igual") else "ya estaba alineado"
+                    p["puntos"] = r.get("puntos")
+            ia, idd = abrir(p["antes"], 512), abrir(p["despues"], 512)
+            wa, ha = ImageOps.exif_transpose(Image.open(p["antes"])).size
+            wd, hd = ImageOps.exif_transpose(Image.open(p["despues"])).size
             p["tam"] = [wa, ha]
             if abs(wa / ha - wd / hd) > 0.01:
                 p["avisos"].append("forma distinta (¿recortaste?)")
@@ -66,6 +88,10 @@ def emparejar(antes, despues):
             p["avisos"].append(f"no se pudo abrir: {e}")
             p["usar"] = False
         pares.append(p)
+    if cache is not None:
+        cache.guardar()
+    if avance:
+        avance(len(nombres), len(nombres))
     return pares, sin
 
 

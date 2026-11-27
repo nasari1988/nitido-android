@@ -1,44 +1,23 @@
 """
-La página del entrenador: un servidor solo para esta PC (127.0.0.1) y su API.
+La página del entrenador (opción en navegador; la app de escritorio es app.py):
+un servidor solo para esta PC (127.0.0.1) y su API.
     python -m nitido_entrenador.servidor [--puerto 8765] [--no-abrir]
 """
 import argparse
 import base64
-import glob
 import io
 import json
 import os
-import random
 import threading
 import webbrowser
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, urlparse
 
-from PIL import Image
 
-from . import datos
+from . import datos, nucleo
 
-AQUI = datos.AQUI
-PROY = os.path.join(AQUI, "proyectos")
-WEB = os.path.join(AQUI, "web")
-MODELOS = ("estilo", "piel")
-corridas = {}          # modelo -> Entrenamiento
-cand = threading.Lock()
-
-
-def carpeta(m):
-    d = os.path.join(PROY, m)
-    os.makedirs(d, exist_ok=True)
-    return d
-
-
-def leer(m):
-    f = os.path.join(carpeta(m), "proyecto.json")
-    return json.load(open(f)) if os.path.exists(f) else {"pares": [], "aumentos": dict(datos.AUMENTOS_BASE)}
-
-
-def guardar(m, p):
-    json.dump(p, open(os.path.join(carpeta(m), "proyecto.json"), "w"), ensure_ascii=False, indent=1)
+WEB = os.path.join(nucleo.AQUI, "web")
+PROY, MODELOS, carpeta, leer, guardar = nucleo.PROY, nucleo.MODELOS, nucleo.carpeta, nucleo.leer, nucleo.guardar
 
 
 def permitido(ruta):
@@ -78,16 +57,10 @@ class H(BaseHTTPRequestHandler):
             if u.path in ("/", "/index.html"):
                 return self._bytes(open(os.path.join(WEB, "index.html"), "rb").read(), "text/html; charset=utf-8")
             if u.path == "/api/estado":
-                from .entrenar import _gpu
-                import torch
-                return self._json({
-                    "gpu": torch.cuda.get_device_name(0) if torch.cuda.is_available() else None, "gpu_info": _gpu(),
-                    "proyectos": {m: {"pares": len(leer(m)["pares"]), "usar": sum(1 for p in leer(m)["pares"] if p.get("usar", True)),
-                                      "mejor": os.path.exists(os.path.join(carpeta(m), f"{m}_mejor.pt")),
-                                      "exportados": sorted(os.path.basename(d) for d in glob.glob(os.path.join(carpeta(m), "exportado", "*")))}
-                                  for m in MODELOS},
-                    "corridas": {m: c.estado for m, c in corridas.items()},
-                })
+                gpu, info = nucleo.tarjeta()
+                return self._json({"gpu": gpu, "gpu_info": info,
+                                   "proyectos": {m: nucleo.resumen(m) for m in MODELOS},
+                                   "corridas": {m: c.estado for m, c in nucleo.corridas.items()}})
             if u.path == "/api/proyecto":
                 return self._json(leer(q["modelo"]))
             if u.path == "/mini":
@@ -97,10 +70,10 @@ class H(BaseHTTPRequestHandler):
                 im = datos.abrir(f, int(q.get("lado", 220)))
                 return self._bytes(jpeg(im), "image/jpeg")
             if u.path == "/api/muestra":
-                fs = sorted(glob.glob(os.path.join(carpeta(q["modelo"]), "muestras", "vuelta_*.jpg")))
-                if not fs:
+                f = nucleo.ultima_muestra(q["modelo"])
+                if not f:
                     return self._json({"error": "aún no hay"}, 404)
-                return self._bytes(open(fs[-1], "rb").read(), "image/jpeg")
+                return self._bytes(open(f, "rb").read(), "image/jpeg")
         except Exception as e:
             return self._json({"error": str(e)}, 500)
         self._json({"error": "no existe"}, 404)
@@ -111,72 +84,25 @@ class H(BaseHTTPRequestHandler):
             b = self._cuerpo(); m = b.get("modelo")
             if m not in MODELOS:
                 return self._json({"error": "modelo: estilo o piel"}, 400)
-            P = leer(m)
             if u.path == "/api/pares":
-                for k in ("antes", "despues"):
-                    if not os.path.isdir(b[k]):
-                        return self._json({"error": f"No existe la carpeta: {b[k]}"}, 400)
-                P["antes_dir"], P["despues_dir"] = os.path.abspath(b["antes"]), os.path.abspath(b["despues"])
-                excl = {p["nombre"] for p in P["pares"] if not p.get("usar", True)}
-                pares, sin = datos.emparejar(P["antes_dir"], P["despues_dir"])
-                for p in pares:
-                    if p["nombre"] in excl:
-                        p["usar"] = False
-                P["pares"], P["sin_pareja"] = pares, sin
-                guardar(m, P)
-                return self._json(P)
+                return self._json(nucleo.revisar_pares(m, b["antes"], b["despues"]))
             if u.path == "/api/usar":
-                for p in P["pares"]:
-                    if p["nombre"] == b["nombre"]:
-                        p["usar"] = bool(b["usar"])
-                guardar(m, P); return self._json({"ok": True})
+                nucleo.usar(m, b["nombre"], b["usar"]); return self._json({"ok": True})
             if u.path == "/api/aumentos":
-                P["aumentos"] = dict(datos.AUMENTOS_BASE, **b["aumentos"]); guardar(m, P)
-                return self._json(P["aumentos"])
+                return self._json(nucleo.poner_aumentos(m, b["aumentos"]))
             if u.path == "/api/vista_aumentos":
-                usar = [p for p in P["pares"] if p.get("usar", True)]
-                if not usar:
-                    return self._json({"error": "sin pares"}, 400)
-                p = next((x for x in usar if x["nombre"] == b.get("nombre")), random.choice(usar))
-                a = datos.abrir(p["antes"], 1024); d = datos.abrir(p["despues"], 1024).resize(a.size)
-                cfg = dict(datos.AUMENTOS_BASE, **P.get("aumentos", {}))
-                out = []
-                for i in range(8):
-                    aa, dd = (a.resize((256, 256)), d.resize((256, 256))) if i == 0 else datos.aumentar(a, d, cfg, 256)
-                    hoja = Image.new("RGB", (512, 256)); hoja.paste(aa, (0, 0)); hoja.paste(dd, (256, 0))
-                    out.append("data:image/jpeg;base64," + base64.b64encode(jpeg(hoja, 80)).decode())
-                return self._json({"nombre": p["nombre"], "vistas": out})
+                nombre, hojas = nucleo.vista_aumentos(m, b.get("nombre"))
+                return self._json({"nombre": nombre, "vistas": ["data:image/jpeg;base64," + base64.b64encode(jpeg(h, 80)).decode() for h in hojas]})
             if u.path == "/api/entrenar":
-                with cand:
-                    c = corridas.get(m)
-                    if c and c.hilo.is_alive():
-                        return self._json({"error": "ya está entrenando"}, 409)
-                    if any(x.hilo.is_alive() for x in corridas.values()):
-                        return self._json({"error": "la tarjeta ya está ocupada con el otro modelo"}, 409)
-                    from .entrenar import Entrenamiento
-                    if b.get("desde_cero"):
-                        for f in glob.glob(os.path.join(carpeta(m), f"{m}_*.pt")):
-                            os.remove(f)
-                    if b.get("vueltas"):
-                        P.setdefault("config", {}).setdefault(m, {})["vueltas"] = int(b["vueltas"]); guardar(m, P)
-                    corridas[m] = Entrenamiento(carpeta(m), m); corridas[m].iniciar()
-                return self._json({"ok": True})
+                nucleo.entrenar(m, b.get("vueltas"), b.get("desde_cero")); return self._json({"ok": True})
             if u.path in ("/api/pausar", "/api/seguir", "/api/detener"):
-                c = corridas.get(m)
-                if not c:
-                    return self._json({"error": "no está entrenando"}, 400)
-                {"/api/pausar": c.pausa.set, "/api/seguir": c.pausa.clear, "/api/detener": c.alto.set}[u.path]()
-                return self._json({"ok": True})
+                nucleo.control(m, u.path.rsplit("/", 1)[1]); return self._json({"ok": True})
             if u.path == "/api/probar":
-                from .exportar import probar
-                if not os.path.isdir(b["carpeta"]):
-                    return self._json({"error": "No existe esa carpeta"}, 400)
-                P["prueba_dir"] = os.path.abspath(b["carpeta"]); guardar(m, P)
-                r = probar(carpeta(m), m, P["prueba_dir"], os.path.join(carpeta(m), "pruebas"))
-                return self._json({"hechos": r})
+                return self._json({"hechos": nucleo.probar(m, b["carpeta"])})
             if u.path == "/api/exportar":
-                from .exportar import exportar
-                return self._json(exportar(carpeta(m), m))
+                return self._json(nucleo.exportar(m))
+        except nucleo.Aviso as e:
+            return self._json({"error": str(e)}, 400)
         except Exception as e:
             import traceback
             traceback.print_exc()
@@ -199,8 +125,7 @@ def main():
         srv.serve_forever()
     except KeyboardInterrupt:
         print("\nCerrando…")
-        for c in corridas.values():
-            c.alto.set()
+        nucleo.detener_todo()
 
 
 if __name__ == "__main__":
