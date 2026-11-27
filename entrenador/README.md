@@ -90,7 +90,19 @@ Cada vuelta crea variantes nuevas de tus pares, al vuelo y sin ocupar disco:
   - `info.json` con la versión, el parecido y la revisión del ONNX contra PyTorch;
   - en Mi estilo, también `mi_estilo_ejemplo.cube`, una tabla de ejemplo que puedes abrir en otros programas.
 
-El siguiente paso, mandar el modelo al teléfono y convertirlo para la NPU, se agrega en la app y en GitHub. Solo viaja ese archivo.
+### Versión NPU (en tu PC)
+
+Con **Crear versión NPU** (paso 4) la última versión exportada se compila para el procesador de IA del teléfono, igual que lo hace el GitHub de Nítido: W8A16, QNN 2.42 (la misma versión que el runtime de la app), Hexagon v73. La calibración usa **tus propias fotos** («antes»), así que los rangos quedan ajustados a lo que vas a retocar.
+
+- Una sola vez, instala el kit de Qualcomm (unos 3 GB; pide tu contraseña para Python 3.10 y libc++):
+  ```bash
+  bash instalar_npu.sh
+  ```
+- Deja en la misma carpeta exportada `mi_piel.bin` + `mi_piel_ctx.onnx` (+ `.json`), o `mi_estilo.*`, y anota la versión NPU en `info.json`. Lo que hizo el kit queda en `npu.log`.
+- Vale sobre todo para **Mi retoque de piel**; Mi estilo es tan pequeño que el procesador normal ya va rápido.
+- Para borrar el kit: las carpetas `qairt/` y `.venvq/`.
+
+El siguiente paso, que la app del teléfono cargue Mi estilo y Mi piel, se agrega en la app. Solo viaja el modelo.
 
 ## Si algo falla
 

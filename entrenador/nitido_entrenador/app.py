@@ -821,7 +821,20 @@ class Exportar(Pantalla):
         le.addWidget(self.abrir)
         le.addStretch(1)
         fe.setFixedWidth(380)
-        cuerpo.addWidget(fe, 0, Qt.AlignTop)
+        lado_der = QVBoxLayout(); lado_der.setSpacing(16)
+        lado_der.addWidget(fe)
+        fn, ln = caja()
+        ln.addWidget(QLabel("<b>Versión NPU</b>"))
+        ln.addWidget(etiqueta("Compila la última versión exportada para el procesador de IA del teléfono (W8A16, "
+                              "QNN 2.42, Hexagon v73), calibrada con tus propias fotos. Tarda unos minutos.", muted=True))
+        self.npu = boton("Crear versión NPU"); self.npu.clicked.connect(self.hacer_npu)
+        ln.addWidget(self.npu)
+        self.nmsg = etiqueta(muted=True)
+        ln.addWidget(self.nmsg)
+        fn.setFixedWidth(380)
+        lado_der.addWidget(fn)
+        lado_der.addStretch(1)
+        cuerpo.addLayout(lado_der)
         self.lay.addLayout(cuerpo, 1)
         self._ultima = None
 
@@ -836,6 +849,14 @@ class Exportar(Pantalla):
                               "Solo sale el modelo: tus fotos se quedan en esta PC. El ONNX se revisa contra PyTorch.")
         self.versiones.setText("Versiones: " + (", ".join(r["exportados"]) or "ninguna"))
         self.emsg.setText(""); self.abrir.hide(); self.pmsg.setText("")
+        self.npu.setEnabled(bool(r["exportados"]))
+        if not r["exportados"]:
+            self.nmsg.setText("Primero exporta el modelo.")
+        elif not nucleo.npu_listo():
+            self.nmsg.setText("Falta el kit de Qualcomm (una sola vez, unos 3 GB): en la carpeta del entrenador corre "
+                              "<b>bash instalar_npu.sh</b>")
+        else:
+            self.nmsg.setText(f"Se hará de {r['exportados'][-1]}.")
         limpiar(self.res)
 
     def hacer_probar(self):
@@ -872,6 +893,22 @@ class Exportar(Pantalla):
             self.exp.setEnabled(True); self.emsg.setText(f'<span style="color:{BAD}">{e}</span>')
 
         en_fondo(lambda _: nucleo.exportar(m), listo, fallo)
+
+    def hacer_npu(self):
+        self.npu.setEnabled(False); self.nmsg.setText("Empezando…")
+        m = self.m
+
+        def listo(r):
+            self.npu.setEnabled(True)
+            mins, seg = divmod(r["segundos"], 60)
+            self.nmsg.setText(f"Listo en {mins} min {seg} s: <b>{os.path.basename(r['bin'])}</b> ({r['mb']} MB) y "
+                              f"<b>{os.path.basename(r['ctx'])}</b><br>{r['carpeta']}")
+            self._ultima = r["carpeta"]; self.abrir.show()
+
+        def fallo(e):
+            self.npu.setEnabled(True); self.nmsg.setText(f'<span style="color:{BAD}">{e}</span>')
+
+        en_fondo(lambda av: nucleo.crear_npu(m, av), listo, fallo, lambda t: self.nmsg.setText(str(t)))
 
     def _abrir_carpeta(self):
         from PySide6.QtCore import QUrl

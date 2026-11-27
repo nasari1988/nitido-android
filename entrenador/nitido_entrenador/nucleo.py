@@ -50,7 +50,8 @@ def resumen(m):
     pares = leer(m)["pares"]
     return {"pares": len(pares), "usar": sum(1 for p in pares if p.get("usar", True)),
             "mejor": os.path.exists(os.path.join(carpeta(m), f"{m}_mejor.pt")),
-            "exportados": sorted(os.path.basename(d) for d in glob.glob(os.path.join(carpeta(m), "exportado", "*")))}
+            "exportados": sorted((os.path.basename(d) for d in glob.glob(os.path.join(carpeta(m), "exportado", f"{m}_v*"))),
+                                 key=lambda n: int(n.rsplit("_v", 1)[1]) if n.rsplit("_v", 1)[1].isdigit() else 0)}
 
 
 def corrida(m):
@@ -184,3 +185,20 @@ def historial(m):
             "paso": 0, "pasos": 0, "falta_s": None, "perdida": s.get("perdida", []), "prueba": s.get("prueba", []),
             "parecido": mejor.get("parecido") if mejor else None, "mejor": mejor,
             "mensaje": f"Guardado en la vuelta {s.get('vuelta', 0)}. Puedes seguir entrenando, probar o exportar.", "gpu": {}}
+
+
+def npu_listo():
+    from . import npu
+    return npu.listo()
+
+
+def crear_npu(m, avance=None):
+    """Versión NPU de la última exportación (necesita el kit: bash instalar_npu.sh)."""
+    from . import npu
+    if not resumen(m)["exportados"]:
+        raise Aviso("Primero exporta el modelo.")
+    try:
+        npu.kit()
+    except npu.FaltaKit as e:
+        raise Aviso(str(e))
+    return npu.crear(carpeta(m), m, avance=avance)
