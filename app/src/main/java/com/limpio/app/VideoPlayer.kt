@@ -117,9 +117,18 @@ fun Context.findActivity(): Activity? {
 }
 
 /** Arma el MediaItem con los subtítulos .srt/.vtt que estén junto al video. */
-fun videoItem(path: String): MediaItem {
+/** Muchos videos de golpe: cada carpeta se lee una sola vez. */
+fun videoItems(paths: List<String>): List<MediaItem> {
+    val names = HashMap<String, List<String>>()
+    return paths.map { p ->
+        val dir = p.substringBeforeLast('/')
+        videoItem(p, names.getOrPut(dir) { File(dir).list()?.filter { n -> n.substringAfterLast('.').lowercase() in MediaUtil.SUB_EXTS }.orEmpty() })
+    }
+}
+
+fun videoItem(path: String, siblings: Collection<String>? = null): MediaItem {
     val b = MediaItem.Builder().setUri(Uri.fromFile(File(path))).setMediaId(path)
-    MediaUtil.findSubtitle(File(path))?.let { sub ->
+    MediaUtil.findSubtitle(File(path), siblings)?.let { sub ->
         val mime = when (sub.extension.lowercase()) {
             "vtt" -> MimeTypes.TEXT_VTT
             "ass", "ssa" -> MimeTypes.TEXT_SSA
@@ -224,15 +233,27 @@ fun VideoPlayerScreen(req: VideoRequest, onClose: () -> Unit) {
     }
 
     // Toda la cola va al reproductor: así precarga el siguiente y pasa sin corte.
+    // El elegido arranca al instante; el resto de la cola se acomoda alrededor sin cortarlo.
     LaunchedEffect(list) {
-        val cur = list.getOrNull(index) ?: return@LaunchedEffect
-        val samePlaying = player.currentMediaItem?.mediaId == cur && player.mediaItemCount > 0
-        val pos = if (samePlaying) player.currentPosition else VideoPositions.get(ctx, cur)
-        val items = withContext(Dispatchers.IO) { list.map { videoItem(it) } }
-        player.setMediaItems(items, index, pos)
-        player.prepare()
-        if (!samePlaying) resumedFrom = pos
-        player.playWhenReady = true
+        val snapshot = list
+        val i = index
+        val cur = snapshot.getOrNull(i) ?: return@LaunchedEffect
+        if (player.currentMediaItem?.mediaId != cur) {
+            val pos = VideoPositions.get(ctx, cur)
+            val first = withContext(Dispatchers.IO) { videoItem(cur) }
+            player.setMediaItem(first, pos)
+            player.prepare()
+            resumedFrom = pos
+            player.playWhenReady = true
+        }
+        val (before, after) = withContext(Dispatchers.IO) {
+            videoItems(snapshot.take(i)) to videoItems(snapshot.drop(i + 1))
+        }
+        val ci = player.currentMediaItemIndex
+        if (ci + 1 < player.mediaItemCount) player.removeMediaItems(ci + 1, player.mediaItemCount)
+        if (ci > 0) player.removeMediaItems(0, ci)
+        player.addMediaItems(after)
+        player.addMediaItems(0, before)
     }
     // Pausa al final de cada video solo cuando hace falta esperar o preguntar.
     LaunchedEffect(PlayPrefs.videoAutoplay, PlayPrefs.videoWait, repeat) {

@@ -91,7 +91,7 @@ class SelfTestViewModel(app: Application) : AndroidViewModel(app) {
 
     private val ctx: Context get() = getApplication()
     private val sandbox = File(Protection.rootPath, "Download/ArchivosAutoprueba")
-    val total = 31
+    val total = 32
 
     fun run() {
         if (running) return
@@ -339,6 +339,22 @@ class SelfTestViewModel(app: Application) : AndroidViewModel(app) {
                     )
                 } finally { p.release() }
             }
+        }
+
+        test("Cola grande de videos") {
+            val dir = File(sandbox, "cola_grande").apply { mkdirs() }
+            val paths = (1..1000).map { File(dir, "v$it.mp4").apply { if (!exists()) writeText("x") }.absolutePath }
+            File(dir, "v500.srt").writeText("1\n00:00:01,000 --> 00:00:02,000\nHola\n")
+            val t0 = System.currentTimeMillis()
+            val items = videoItems(paths)
+            val ms = System.currentTimeMillis() - t0
+            val subs = items.count { it.localConfiguration?.subtitleConfigurations?.isNotEmpty() == true }
+            dir.deleteRecursively()
+            check(
+                items.size == 1000 && subs == 1 && ms < 3000,
+                "1000 videos listos en $ms ms, subtítulo encontrado",
+                "Tardó $ms ms; subtítulos encontrados: $subs"
+            )
         }
 
         test("Recordar posición de video") {

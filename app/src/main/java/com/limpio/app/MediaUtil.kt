@@ -24,12 +24,22 @@ object MediaUtil {
         return if (s >= 3600) "%d:%02d:%02d".format(s / 3600, s / 60 % 60, s % 60) else "%d:%02d".format(s / 60, s % 60)
     }
 
-    private val SUB_EXTS = listOf("srt", "vtt", "ass", "ssa")
+    val SUB_EXTS = listOf("srt", "vtt", "ass", "ssa")
 
     /** Subtítulos con el mismo nombre que el video: "pelicula.mp4" → "pelicula.srt" o "pelicula.es.srt". */
-    fun findSubtitle(video: File): File? {
+    /**
+     * [siblings]: nombres de la carpeta ya leídos (para colas grandes: se lee la carpeta una
+     * sola vez en lugar de una vez por video).
+     */
+    fun findSubtitle(video: File, siblings: Collection<String>? = null): File? {
         val base = video.nameWithoutExtension
         val dir = video.parentFile ?: return null
+        if (siblings != null) {
+            val name = siblings.firstOrNull { n ->
+                n.startsWith("$base.") && n.substringAfterLast('.').lowercase() in SUB_EXTS
+            } ?: return null
+            return File(dir, name)
+        }
         SUB_EXTS.forEach { ext ->
             File(dir, "$base.$ext").takeIf { it.isFile }?.let { return it }
         }
